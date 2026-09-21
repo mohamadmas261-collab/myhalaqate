@@ -99,7 +99,8 @@ class _SyncIndicatorState extends State<SyncIndicator> {
 
 /// أيقونة المزامنة لشريط التطبيق العلوي — تُستخدم في actions: داخل AppBar
 class SyncAppBarAction extends StatefulWidget {
-  const SyncAppBarAction({Key? key}) : super(key: key);
+  final VoidCallback? onViewPending;
+  const SyncAppBarAction({Key? key, this.onViewPending}) : super(key: key);
 
   @override
   State<SyncAppBarAction> createState() => _SyncAppBarActionState();
@@ -162,7 +163,13 @@ class _SyncAppBarActionState extends State<SyncAppBarAction> {
                 )
               : Icon(icon, color: color),
           tooltip: tooltip,
-          onPressed: () => SyncManager.instance.syncAll(),
+          onPressed: () {
+            if (widget.onViewPending != null) {
+              widget.onViewPending!();
+            } else {
+              SyncManager.instance.syncAll();
+            }
+          },
         );
       },
     );

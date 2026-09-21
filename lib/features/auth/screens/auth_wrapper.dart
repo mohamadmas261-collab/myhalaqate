@@ -46,7 +46,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (_isAuthenticated) {
       return const MainScreen(); 
     } else {
-      return const LoginScreen(); 
+      // شاشة الدخول دائماً ثيم نهاري
+      return Theme(data: ThemeData.light(), child: const LoginScreen());
     }
   }
 }

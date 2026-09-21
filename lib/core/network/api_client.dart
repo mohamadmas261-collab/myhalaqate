@@ -1,10 +1,17 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
+  /// يُستخدم للعزل الخلفي حيث لا يعمل dotenv
+  static String? _forcedBaseUrl;
+
+  /// ضبط BASE_URL يدوياً (للاستخدام من العزل الخلفي)
+  static void forceBaseUrl(String url) => _forcedBaseUrl = url;
+
   late final Dio dio;
-  final String baseUrl = dotenv.env['BASE_URL'] ?? 'http://10.0.2.2:8000';
+  final String baseUrl = _forcedBaseUrl ?? dotenv.env['BASE_URL'] ?? 'http://10.0.2.2:8000';
 
   ApiClient() {
     dio = Dio(BaseOptions(
@@ -82,5 +89,25 @@ class ApiClient {
         return handler.next(e);
       },
     ));
+  }
+
+  /// التحقق الذكي من الاتصال: connectivity_plus + طلب اختبار حقيقي للسيرفر
+  /// ملاحظة: نستخدم dio الخاص بالتطبيق (مع التوكن) ونعتبر أي رد من السيرفر
+  /// — حتى 401 — دليلاً على أن الإنترنت يعمل. الخطأ 401 سابقاً كان يجعل
+  /// الدالة ترجع false رغم وجود الإنترنت فيُحفظ الطلب محلياً بلا داعٍ.
+  static Future<bool> isReallyOnline() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (results.isEmpty || results.contains(ConnectivityResult.none)) {
+        return false;
+      }
+      final response = await ApiClient().dio.get(
+        '/api/courses/',
+        options: Options(validateStatus: (_) => true),
+      ).timeout(const Duration(seconds: 5));
+      return response.statusCode != null;
+    } catch (_) {
+      return false;
+    }
   }
 }

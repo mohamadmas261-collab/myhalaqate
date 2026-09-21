@@ -27,6 +27,15 @@ class CourseService {
   Future<Map<String, dynamic>?> getCourseDetails(int courseId) async {
     final prefs = await SharedPreferences.getInstance();
     final cacheKey = 'course_details_$courseId';
+    final cached = prefs.getString(cacheKey);
+    // كاش أولاً: إرجاع فوري إن وُجد + تحديث بالخلفية (Stale-While-Revalidate)
+    if (cached != null && cached.isNotEmpty) {
+      _refreshCourseDetailsInBackground(courseId, cacheKey);
+      try {
+        return jsonDecode(cached);
+      } catch (_) {}
+    }
+    // لا يوجد كاش: انتظار الشبكة
     try {
       final response = await _dio.get('/api/courses/$courseId/');
       if (response.statusCode == 200) {
@@ -36,10 +45,19 @@ class CourseService {
       return null;
     } catch (e) {
       print('🚨 خطأ في جلب تفاصيل الدورة: $e');
-      final cached = prefs.getString(cacheKey);
-      if (cached != null) return jsonDecode(cached);
       return null;
     }
+  }
+
+  // تحديث كاش تفاصيل الدورة بالخلفية بدون حجب الواجهة
+  void _refreshCourseDetailsInBackground(int courseId, String cacheKey) {
+    _dio.get('/api/courses/$courseId/').then((response) {
+      if (response.statusCode == 200) {
+        SharedPreferences.getInstance().then((prefs) => prefs.setString(cacheKey, jsonEncode(response.data)));
+      }
+    }).catchError((e) {
+      print('⚠️ تحديث كاش الدورة بالخلفية فشل: $e');
+    });
   }
 
   // خريطة أسماء الأيام العربية → رقم اليوم (الأحد=0 .. السبت=6)

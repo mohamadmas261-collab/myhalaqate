@@ -7,16 +7,23 @@ class StudentService {
   final Dio _dio = ApiClient().dio;
   final DatabaseHelper _db = DatabaseHelper.instance;
 
-  Future<List<dynamic>> getStudentsByCircle(int circleId) async {
+ Future<List<dynamic>> getStudentsByCircle(int circleId) async {
     try {
       // 1. محاولة جلب الطلاب من السيرفر
       final response = await _dio.get('/api/enrollments/?circle=$circleId');
       if (response.statusCode == 200) {
-        final List<dynamic> students = response.data['results'] ?? [];
+        final List<dynamic> allStudents = response.data['results'] ?? [];
         
-        // 2. تحديث الكاش المحلي: مسح القديم للحلقة وإضافة الجديد
+        // 💡 التعديل هنا: فلترة القائمة بحيث نأخذ الطلاب النشطين فقط
+        final List<dynamic> activeStudents = allStudents
+            .where((s) => s['status'] == 'active')
+            .toList();
+        
+        // 2. تحديث الكاش المحلي: مسح القديم للحلقة وإضافة الجديد (النشطين فقط)
         await _db.delete('cached_students', 'circle_id = ?', [circleId]);
-        for (var s in students) {
+        
+        // استخدام القائمة المفلترة في حلقة التخزين
+        for (var s in activeStudents) {
           await _db.insert('cached_students', {
             'enrollment_id': s['id'],
             'name': s['student_name'] ?? 'بدون اسم',
@@ -26,14 +33,22 @@ class StudentService {
             'status': s['status'] ?? 'active'
           });
         }
-        return students;
+        
+        // إرجاع القائمة المفلترة فقط
+        return activeStudents;
       }
     } catch (e) {
       print('⚠️ لا يوجد اتصال، سيتم عرض الطلاب من قاعدة البيانات المحلية: $e');
     }
 
     // 3. في حال انقطاع الإنترنت، جلب البيانات من SQLite
-    final cached = await _db.queryWhere('cached_students', 'circle_id = ?', [circleId]);
+    // 💡 تعديل إضافي كطبقة حماية: جلب الطلاب النشطين فقط من الكاش المحلي 
+    final cached = await _db.queryWhere(
+      'cached_students', 
+      'circle_id = ? AND status = ?', 
+      [circleId, 'active']
+    );
+    
     return cached.map((c) => {
       'id': c['enrollment_id'],
       'student_name': c['name'],

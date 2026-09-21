@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myhalaqat/core/widgets/custom_snackbar.dart';
 import 'package:myhalaqat/features/auth/services/auth_service.dart';
 import 'package:myhalaqat/features/dashboard/screens/main_screen.dart';
@@ -17,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen>
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  String _appVersion = '1.1.2';
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
@@ -34,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
+    SharedPreferences.getInstance().then((p) { if (mounted) setState(() => _appVersion = p.getString('app_version') ?? '1.1.2'); });
   }
 
   @override
@@ -46,6 +49,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
+    // شاشة الدخول دائماً ثيم نهاري (حتى لو الوضع الليلي مفعل)
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -94,7 +98,7 @@ class _LoginScreenState extends State<LoginScreen>
 
                       // --- العنوان ---
                       const Text(
-                        'حلقات القرآن الكريم',
+                        'تطبيق المعلم القرآني',
                         style: TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
@@ -232,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen>
 
                       // --- نسخة التطبيق ---
                       Text(
-                        'الإصدار 1.0.0',
+                        'الإصدار $_appVersion',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.5),
                           fontSize: 12,

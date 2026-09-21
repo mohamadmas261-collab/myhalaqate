@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myhalaqat/core/network/api_client.dart';
 import 'package:myhalaqat/core/database/database_helper.dart';
 import 'package:myhalaqat/core/network/sync_manager.dart';
+import 'package:myhalaqat/core/notifiers/app_notifiers.dart';
 
 class MemorizationService {
   final Dio _dio = ApiClient().dio;
@@ -116,6 +117,7 @@ class MemorizationService {
         "created_at": DateTime.now().toIso8601String(),
       });
       
+      refreshPendingCount();
       SyncManager.instance.syncAll();
       return true;
     } catch (e) {

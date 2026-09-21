@@ -8,6 +8,8 @@ import 'package:myhalaqat/features/saber/screens/create_saber_request_screen.dar
 import 'package:myhalaqat/features/students/screens/students_list_screen.dart';
 import 'package:myhalaqat/features/attendance/screens/circle_attendance_record_screen.dart';
 import 'package:myhalaqat/features/students/screens/circle_memorization_record_screen.dart';
+import 'package:myhalaqat/features/pending/screens/pending_items_screen.dart';
+import 'package:myhalaqat/features/students/screens/student_statistics_screen.dart';
 
 class CircleDetailsScreen extends StatefulWidget {
   final int circleId;
@@ -29,11 +31,15 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen> {
   final CircleService _circleService = CircleService();
   Map<String, dynamic>? _circleData;
   bool _isLoading = true;
+  List<dynamic> _archivedStudents = [];
+  bool _isLoadingArchived = true;
+  bool _archivedExpanded = true;
 
   @override
   void initState() {
     super.initState();
     _fetchCircleDetails();
+    _fetchArchivedStudents();
   }
 
   Future<void> _fetchCircleDetails() async {
@@ -43,32 +49,157 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen> {
     }
   }
 
+  Future<void> _fetchArchivedStudents() async {
+    final data = await _circleService.getArchivedStudents(
+      courseId: widget.courseId,
+      circleId: widget.circleId,
+    );
+    if (mounted) {
+      setState(() { _archivedStudents = data; _isLoadingArchived = false; });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.circleName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        actions: const [SyncAppBarAction()],
+        actions: [
+          SyncAppBarAction(
+            onViewPending: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PendingItemsScreen())),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // بطاقة الحلقة
-                  _buildCircleHeader(),
-                  const SizedBox(height: 24),
+          : SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // بطاقة الحلقة
+                    _buildCircleHeader(),
+                    const SizedBox(height: 24),
 
-                  // الإجراءات الرئيسية
-                  const Text('الإجراءات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  _buildActionGrid(),
-                ],
+                    // الإجراءات الرئيسية
+                    const Text('الإجراءات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    _buildActionGrid(),
+                    const SizedBox(height: 24),
+
+                    // الطلاب المؤرشفون
+                    _buildArchivedSection(),
+                    // هامش سفلي آمن حتى لا يلتصق المحتوى بحافة الشاشة
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
     );
+  }
+
+  /// قسم قابل للتوسع: الطلاب المؤرشفون في هذه الحلقة
+  Widget _buildArchivedSection() {
+    final count = _archivedStudents.length;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 1,
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => setState(() => _archivedExpanded = !_archivedExpanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                    child: Icon(Icons.archive, color: Colors.grey.shade700, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text('الطلاب المفصولين من الحلقة ($count)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                  Icon(_archivedExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.grey.shade500),
+                ],
+              ),
+            ),
+          ),
+          if (_archivedExpanded) ...[
+            const Divider(height: 1),
+            if (_isLoadingArchived)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_archivedStudents.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text('لا يوجد طلاب مؤرشفون',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              )
+            else
+              ..._archivedStudents.map((s) => _buildArchivedStudentTile(s)),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// بطاقة طالب مؤرشف: الاسم + الهاتف + تاريخ التسجيل + تاريخ الأرشفة
+  Widget _buildArchivedStudentTile(dynamic s) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final phone = (s['student_phone'] ?? '').toString();
+    final enrolledAt = _formatDate(s['enrolled_at']);
+    final archivedAt = _formatDate(s['archived_at']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.grey.withOpacity(0.15),
+            child: Icon(Icons.person_off, color: Colors.grey.shade600, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s['student_name'] ?? '',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white70 : Colors.black87)),
+                if (phone.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.phone, size: 13, color: Colors.grey.shade600),
+                    const SizedBox(width: 4),
+                    Text(phone, style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  ]),
+                ],
+                const SizedBox(height: 3),
+                Wrap(spacing: 12, runSpacing: 2, children: [
+                  Text('تاريخ التسجيل: $enrolledAt', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                  Text('تاريخ الأرشفة: $archivedAt', style: TextStyle(fontSize: 11, color: Colors.red.shade400)),
+                ]),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// تنسيق التاريخ للعرض (بدون وقت)
+  String _formatDate(dynamic raw) {
+    final s = (raw ?? '').toString();
+    if (s.isEmpty) return '-';
+    return s.split(' ')[0].split('T')[0];
   }
 
   Widget _buildCircleHeader() {
@@ -131,14 +262,26 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: _buildActionCard(
-            title: 'طلب سبر', icon: Icons.quiz, color: Colors.blue,
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => CreateSaberRequestScreen(circleId: widget.circleId),
+        Row(
+          children: [
+            Expanded(child: _buildActionCard(
+              title: 'طلب سبر', icon: Icons.quiz, color: Colors.blue,
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => CreateSaberRequestScreen(circleId: widget.circleId),
+              )),
             )),
-          ),
+            const SizedBox(width: 12),
+            Expanded(child: _buildActionCard(
+              title: 'إحصائيات الطلاب', icon: Icons.insights, color: Colors.purple,
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => StudentStatisticsScreen(
+                  circleId: widget.circleId,
+                  circleName: widget.circleName,
+                  courseId: widget.courseId,
+                ),
+              )),
+            )),
+          ],
         ),
       ],
     );

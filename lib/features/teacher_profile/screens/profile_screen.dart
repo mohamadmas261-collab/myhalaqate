@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:myhalaqat/core/network/api_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:myhalaqat/core/database/database_helper.dart';
-import 'package:myhalaqat/core/network/sync_manager.dart';
 import 'package:myhalaqat/features/auth/screens/login_screen.dart';
 import 'package:myhalaqat/core/widgets/custom_snackbar.dart';
-import 'package:myhalaqat/core/notifiers/app_notifiers.dart'; // جلبنا ثيم التطبيق من هنا
+import 'package:myhalaqat/core/theme/app_theme.dart';
+import 'package:myhalaqat/core/notifiers/app_notifiers.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -17,13 +16,13 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String _teacherName = 'جاري التحميل...';
   String _teacherPhone = '---';
+  String _appVersion = '1.1.2';
   bool _isLoading = true;
-  bool _isSyncing = false;
-
   @override
   void initState() {
     super.initState();
     _loadProfileData();
+    SharedPreferences.getInstance().then((p) => _appVersion = p.getString('app_version') ?? '1.1.2');
   }
 
  Future<void> _loadProfileData() async {
@@ -57,20 +56,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _teacherPhone = prefs.getString('teacher_phone') ?? 'رقم غير مسجل';
         _isLoading = false;
       });
-    }
-  }
-
-  Future<void> _forceSync() async {
-    setState(() => _isSyncing = true);
-    final result = await SyncManager.instance.syncAll();
-    setState(() => _isSyncing = false);
-
-    if (mounted) {
-      if (result.successCount > 0) {
-        CustomSnackbar.show(context, message: 'تمت المزامنة بنجاح', color: Colors.green, icon: Icons.cloud_done);
-      } else {
-        CustomSnackbar.show(context, message: 'لا توجد بيانات جديدة لرفعها', color: Colors.blue, icon: Icons.info_outline);
-      }
     }
   }
 
@@ -115,32 +100,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-
-                  // --- 3. إدارة البيانات (المزامنة مخفية بشكل أنيق) ---
-                  _buildSectionLabel('البيانات والمزامنة'),
-                  _buildSettingsGroup(
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.sync, color: Colors.blue),
-                        title: const Text('مزامنة البيانات الآن', style: TextStyle(fontWeight: FontWeight.w600)),
-                        trailing: _isSyncing
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: _isSyncing ? null : _forceSync,
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: Icon(Icons.cleaning_services, color: Colors.orange.shade700),
-                        title: const Text('تحديث الذاكرة', style: TextStyle(fontWeight: FontWeight.w600)),
-                        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: () async {
-                          await DatabaseHelper.instance.clearTable('cached_students');
-                          if (mounted) CustomSnackbar.show(context, message: 'تم تحديث الذاكرة بنجاح', color: Colors.green);
-                        },
-                      ),
-                    ],
-                  ),
                   const SizedBox(height: 32),
 
                   // --- 4. تسجيل الخروج ---
@@ -167,7 +126,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text('الإصدار 1.0.0', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                  Text('الإصدار $_appVersion', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                 ],
               ),
             ),
@@ -181,8 +140,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         CircleAvatar(
           radius: 45,
-          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-          child: Icon(Icons.person, size: 50, color: Theme.of(context).primaryColor),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? AppColors.primary.withOpacity(0.2)
+              : Theme.of(context).primaryColor.withOpacity(0.1),
+          child: Icon(Icons.person, size: 50, color: AppColors.primary),
         ),
         const SizedBox(height: 12),
         Text(_teacherName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),

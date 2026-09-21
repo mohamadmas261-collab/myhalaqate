@@ -1,11 +1,9 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:myhalaqat/core/theme/app_theme.dart';
 import 'package:myhalaqat/core/widgets/custom_snackbar.dart';
+import 'package:myhalaqat/core/network/api_client.dart';
 import 'package:myhalaqat/features/students/services/student_service.dart';
 import 'package:myhalaqat/features/saber/services/saber_service.dart';
-import 'package:myhalaqat/core/network/sync_manager.dart';
-import 'package:myhalaqat/core/notifiers/app_notifiers.dart';
 
 class CreateSaberRequestScreen extends StatefulWidget {
   final int circleId;
@@ -21,6 +19,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
   final TextEditingController _searchCtrl = TextEditingController();
   late TabController _tabController;
   bool _isLoading = true;
+  bool _isSubmitting = false;
   List<dynamic> _students = [];
   List<dynamic> _filteredStudents = [];
   List<dynamic> _previousRequests = [];
@@ -54,7 +53,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
     setState(() => _isLoading = true);
     final results = await Future.wait([
       _studentService.getStudentsByCircle(widget.circleId),
-      _saberService.getMySaberRequests(),
+      _saberService.getMySaberRequests(widget.circleId),
       _saberService.getPendingLocalRequests(),
     ]);
     if (mounted) {
@@ -119,10 +118,10 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
         ),
         Expanded(
           child: ListView(
-            padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + MediaQuery.of(context).padding.bottom + 16),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 80), // مساحة سفلية ثابتة ومضمونة
             children: _filteredStudents.map((s) => _buildStudentCard(s)).toList(),
           ),
-        ),
+        ), 
       ],
     );
   }
@@ -132,7 +131,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
       return const Center(child: Text('لا توجد طلبات سابقة', style: TextStyle(color: Colors.grey, fontSize: 16)));
     }
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
       children: [
         if (_pendingLocal.isNotEmpty) ...[
           Padding(
@@ -168,6 +167,8 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
   }
 
   Widget _buildStudentCard(dynamic student) {
+    // مؤشر حالة آخر طلب سبر لهذا الطالب
+    final lastRequest = _latestRequestFor(student['id']);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -184,7 +185,22 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
                 child: const Icon(Icons.person, color: AppColors.primary),
               ),
               const SizedBox(width: 14),
-              Expanded(child: Text(student['student_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(student['student_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    if (lastRequest != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          _requestBadgeText(lastRequest),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _requestBadgeColor(lastRequest)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
               const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
             ],
           ),
@@ -193,7 +209,50 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
     );
   }
 
+  /// جلب آخر طلب سبر لطالب معين (من السيرفر أو المحلي)
+  Map<String, dynamic>? _latestRequestFor(dynamic enrollmentId) {
+    Map<String, dynamic>? latest;
+    DateTime latestTime = DateTime.fromMillisecondsSinceEpoch(0);
+    for (final r in [..._previousRequests, ..._pendingLocal]) {
+      final id = r['enrollment'] ?? r['enrollment_id'];
+      if (id == null || id.toString() != enrollmentId.toString()) continue;
+      final t = DateTime.tryParse((r['requested_at'] ?? r['created_at'] ?? '').toString()) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      if (latest == null || t.isAfter(latestTime)) {
+        latest = Map<String, dynamic>.from(r as Map);
+        latestTime = t;
+      }
+    }
+    return latest;
+  }
+
+  /// نسبة النجاح في الطلب المكتمل
+  double _requestPercentage(Map<String, dynamic> r) {
+    final score = double.tryParse((r['admin_score'] ?? '').toString()) ?? 0;
+    final max = double.tryParse((r['admin_max_score'] ?? '').toString()) ?? 100;
+    return max > 0 ? (score / max * 100) : 0;
+  }
+
+  /// نص مؤشر الحالة بجانب اسم الطالب
+  String _requestBadgeText(Map<String, dynamic> r) {
+    final part = r['part_name'] ?? 'جزء ${r['quran_part'] ?? r['quran_part_id'] ?? '?'}';
+    final status = r['status'] ?? 'pending';
+    if (status == 'completed') {
+      return '${_requestPercentage(r) >= 50 ? 'سبر ناجح' : 'سبر راسب'} - $part';
+    }
+    if (status == 'rejected') return 'طلب مرفوض - $part';
+    return 'طلب سبر - $part';
+  }
+
+  /// لون مؤشر الحالة
+  Color _requestBadgeColor(Map<String, dynamic> r) {
+    final status = r['status'] ?? 'pending';
+    if (status == 'completed') return _requestPercentage(r) >= 50 ? Colors.green : Colors.red;
+    if (status == 'rejected') return Colors.red;
+    return Colors.orange;
+  }
+
   Widget _buildPendingCard(Map<String, dynamic> req) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -206,7 +265,11 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('طلب قيد المزامنة ⏳', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              Text('الجزء ${req['quran_part_id'] ?? '?'}', style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+              Text('الجزء ${req['quran_part_id'] ?? '?'} — ${req['quiz_type'] == 'new' ? 'حفظ جديد' : 'مراجعة'}',
+                style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700], fontSize: 12)),
+              if ((req['created_at'] ?? '').toString().isNotEmpty)
+                Text('تاريخ الطلب: ${req['created_at'].toString().split(' ')[0].split('T')[0]}',
+                  style: TextStyle(color: isDark ? Colors.white60 : Colors.grey[600], fontSize: 11)),
             ]),
           ),
           IconButton(
@@ -252,16 +315,28 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
       ),
     );
     if (confirm != true) return;
-    final ok = await _saberService.deleteSaberRequest(requestId, isLocal: false);
-    if (ok && mounted) {
-      setState(() => _previousRequests.removeWhere((r) => r['id'] == requestId));
-      CustomSnackbar.show(context, message: 'تم حذف الطلب', color: Colors.green, icon: Icons.check_circle);
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+    _showLoadingDialog('جاري حذف الطلب...');
+    try {
+      final ok = await _saberService.deleteSaberRequest(requestId, isLocal: false);
+      if (mounted) {
+        Navigator.pop(context); // إغلاق Loading
+        if (ok) {
+          setState(() => _previousRequests.removeWhere((r) => r['id'] == requestId));
+          CustomSnackbar.show(context, message: 'تم حذف الطلب', color: Colors.green, icon: Icons.check_circle);
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
   Future<void> _showSaberForm(dynamic student) async {
-    int selectedPart = 1;
-    String quizType = 'new';
+    // لا قيم افتراضية: المستخدم يجب أن يختار بنفسه
+    int? selectedPart;
+    String? quizType;
+    String? formError;
     final notesCtrl = TextEditingController();
 
     final saved = await showDialog<bool>(
@@ -279,7 +354,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
                 Row(children: [
                   const Icon(Icons.quiz, color: AppColors.primary, size: 24),
                   const SizedBox(width: 10),
-                  Text(student['student_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  Expanded(child: Text(student['student_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
                 ]),
                 const SizedBox(height: 20),
 
@@ -287,18 +362,19 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
                 const SizedBox(height: 8),
                 DropdownButtonFormField<int>(
                   value: selectedPart,
+                  hint: const Text('اختر الجزء...'),
                   items: List.generate(30, (i) => DropdownMenuItem(value: i + 1, child: Text('الجزء ${i + 1}'))),
-                  onChanged: (v) => setDialogState(() => selectedPart = v ?? 1),
+                  onChanged: (v) => setDialogState(() { selectedPart = v; formError = null; }),
                   decoration: const InputDecoration(prefixIcon: Icon(Icons.auto_stories)),
                 ),
                 const SizedBox(height: 16),
 
-                const Text('النوع:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const Text('النوع: *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 const SizedBox(height: 8),
                 Row(children: [
-                  Expanded(child: _choiceChip('حفظ جديد', 'new', quizType, Icons.star, AppColors.primary, (v) => setDialogState(() => quizType = v))),
+                  Expanded(child: _choiceChip('حفظ جديد', 'new', quizType, Icons.star, AppColors.primary, (v) => setDialogState(() { quizType = v; formError = null; }))),
                   const SizedBox(width: 12),
-                  Expanded(child: _choiceChip('مراجعة', 'review', quizType, Icons.menu_book, AppColors.info, (v) => setDialogState(() => quizType = v))),
+                  Expanded(child: _choiceChip('مراجعة', 'review', quizType, Icons.menu_book, AppColors.info, (v) => setDialogState(() { quizType = v; formError = null; }))),
                 ]),
                 const SizedBox(height: 16),
 
@@ -310,18 +386,56 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
                     prefixIcon: Icon(Icons.notes),
                   ),
                 ),
+
+                // رسالة خطأ التحقق
+                if (formError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.withOpacity(0.3)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(formError!, style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold))),
+                    ]),
+                  ),
+                ],
                 const SizedBox(height: 24),
 
-                SizedBox(
-                  width: double.infinity, height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    icon: const Icon(Icons.send_rounded),
-                    label: const Text('إرسال الطلب'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    // 1. التحقق من الاختيارات
+                    if (selectedPart == null) {
+                      setDialogState(() => formError = 'الرجاء اختيار الجزء أولاً');
+                      return;
+                    }
+                    if (quizType == null) {
+                      setDialogState(() => formError = 'الرجاء اختيار نوع السبر أولاً');
+                      return;
+                    }
+                    // 2. نافذة التأكيد
+                    final confirmed = await _showConfirmSendDialog(
+                      student: student,
+                      part: selectedPart!,
+                      quizType: quizType!,
+                      notes: notesCtrl.text,
+                    );
+                    if (confirmed == true && ctx.mounted) Navigator.pop(ctx, true);
+                  },
+                  icon: const Icon(Icons.send_rounded),
+                  label: const Text('إرسال الطلب'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary, 
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(50), 
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -332,39 +446,143 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
       ),
     );
 
+    final teacherNotes = notesCtrl.text.trim();
     notesCtrl.dispose();
-    if (saved == true) {
-      final connectivity = await Connectivity().checkConnectivity();
-      final isOnline = !connectivity.contains(ConnectivityResult.none) && !connectivity.contains(ConnectivityResult.other);
 
-      if (isOnline) {
-        final ok = await _saberService.createSaberRequestOnline(
-          enrollmentId: student['id'],
-          quranPart: selectedPart,
-          quizType: quizType,
-          teacherNotes: notesCtrl.text,
-        );
-        if (mounted) {
-          if (ok) {
-            CustomSnackbar.show(context, message: 'تم إرسال طلب السبر بنجاح ✅', color: Colors.green, icon: Icons.check_circle);
-          } else {
-            CustomSnackbar.show(context, message: 'فشل الإرسال، حفظ محلياً', color: Colors.orange, icon: Icons.warning);
+    if (saved == true && selectedPart != null && quizType != null) {
+      if (_isSubmitting) return;
+      setState(() => _isSubmitting = true);
+      _showLoadingDialog('جاري إرسال طلب السبر...');
+      try {
+        final isOnline = await ApiClient.isReallyOnline();
+
+        if (!isOnline) {
+          // لا يوجد إنترنت → حفظ محلي للمزامنة لاحقاً
+          await _saberService.createSaberRequest(
+            enrollmentId: student['id'],
+            quranPart: selectedPart!,
+            quizType: quizType!,
+            teacherNotes: teacherNotes,
+          );
+          if (mounted) {
+            Navigator.pop(context); // إغلاق Loading
+            CustomSnackbar.show(context, message: 'لا يوجد اتصال — سيُرسل الطلب تلقائياً عند عودة الإنترنت', color: Colors.orange, icon: Icons.cloud_upload);
+            _loadData();
           }
-          _loadData();
+        } else {
+          // يوجد إنترنت → إرسال مباشر مع تصنيف النتيجة
+          final result = await _saberService.createSaberRequestOnline(
+            enrollmentId: student['id'],
+            quranPart: selectedPart!,
+            quizType: quizType!,
+            teacherNotes: teacherNotes,
+          );
+          if (mounted) {
+            Navigator.pop(context); // إغلاق Loading
+            if (result.isSent) {
+              CustomSnackbar.show(context, message: 'تم إرسال طلب السبر بنجاح ✅', color: Colors.green, icon: Icons.check_circle);
+            } else if (result.isQueued) {
+              CustomSnackbar.show(context, message: 'تعذر الوصول للسيرفر — سيُرسل الطلب تلقائياً', color: Colors.orange, icon: Icons.cloud_upload);
+            } else {
+              CustomSnackbar.show(context, message: result.errorMessage ?? 'فشل إرسال الطلب', color: Colors.red, icon: Icons.error);
+            }
+            _loadData();
+          }
         }
-      } else {
-        await _saberService.createSaberRequest(
-          enrollmentId: student['id'],
-          quranPart: selectedPart,
-          quizType: quizType,
-          teacherNotes: notesCtrl.text,
-        );
-        if (mounted) {
-          CustomSnackbar.show(context, message: 'حفظ محلياً — سيرسل فور توفر الإنترنت', color: Colors.orange, icon: Icons.cloud_upload);
-          _loadData();
-        }
+      } finally {
+        if (mounted) setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  /// نافذة تأكيد تعرض البيانات المختارة قبل الإرسال الفعلي
+  Future<bool?> _showConfirmSendDialog({
+    required dynamic student,
+    required int part,
+    required String quizType,
+    required String notes,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.fact_check, color: AppColors.primary, size: 22),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('تأكيد إرسال الطلب', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _confirmRow(Icons.person, 'الطالب', student['student_name'] ?? ''),
+            _confirmRow(Icons.auto_stories, 'الجزء', 'الجزء $part'),
+            _confirmRow(Icons.quiz, 'النوع', quizType == 'new' ? 'حفظ جديد' : 'مراجعة'),
+            if (notes.isNotEmpty) _confirmRow(Icons.notes, 'الملاحظات', notes),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.info.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('هل أنت متأكد من إرسال الطلب؟',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text('موافق'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _confirmRow(IconData icon, String label, String value) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, size: 16, color: Colors.grey[500]),
+        const SizedBox(width: 8),
+        Text('$label: ', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[600], fontSize: 13)),
+        Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+      ]),
+    );
+  }
+
+  void _showLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Center(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildRequestCard(Map<String, dynamic> req) {
@@ -374,6 +592,13 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
     final percentage = maxScore > 0 ? (score / maxScore * 100) : 0.0;
     final isFailed = status == 'completed' && percentage < 50;
     final bool isPending = status == 'pending';
+
+    // التاريخ المناسب: معلق → تاريخ الطلب | مكتمل → تاريخ السبر
+    final requestedAt = (req['requested_at'] ?? '').toString();
+    final completedAt = (req['completed_at'] ?? '').toString();
+    final useQuizDate = status == 'completed' && completedAt.isNotEmpty;
+    final rawDate = (useQuizDate ? completedAt : requestedAt).split(' ')[0].split('T')[0];
+    final requestDateText = rawDate.isEmpty ? '' : '${useQuizDate ? 'تاريخ السبر' : 'تاريخ الطلب'}: $rawDate';
     Color statusColor; String statusText; IconData statusIcon;
     if (isFailed) {
       statusColor = Colors.red; statusText = 'راسب'; statusIcon = Icons.cancel;
@@ -416,6 +641,10 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
             if (status == 'completed')
               Text('$score/$maxScore', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isFailed ? Colors.red : Colors.green)),
           ]),
+          if (requestDateText.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 4),
+              child: Text(requestDateText, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+            ),
           if (req['admin_notes'] != null && (req['admin_notes'] as String).isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 4),
               child: Text('ملاحظة: ${req['admin_notes']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
@@ -425,14 +654,15 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
     );
   }
 
-  Widget _choiceChip(String label, String value, String current, IconData icon, Color color, void Function(String) onChanged) {
+  Widget _choiceChip(String label, String value, String? current, IconData icon, Color color, void Function(String) onChanged) {
     final selected = current == value;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: () => onChanged(value),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.1) : Colors.grey.shade50,
+          color: selected ? color.withOpacity(0.1) : isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade50,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? color : Colors.grey.shade300, width: selected ? 2 : 1),
         ),

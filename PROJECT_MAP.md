@@ -18,7 +18,7 @@ myhalaqat_flutter/
 │   ├── main.dart                     # نقطة الدخول + تهيئة WorkManager
 │   ├── core/
 │   │   ├── database/
-│   │   │   └── database_helper.dart   # SQLite (DB version 6)
+  │   │   │   └── database_helper.dart   # SQLite (DB version 7)
 │   │   ├── network/
 │   │   │   ├── api_client.dart         # Dio + Token Interceptor + Refresh
 │   │   │   └── sync_manager.dart       # محرك المزامنة الرئيسي
@@ -94,6 +94,11 @@ myhalaqat_flutter/
 │       │   │   └── student_comprehensive_report_screen.dart
 │       │   └── services/
 │       │       └── reports_service.dart
+│       ├── pending/
+│       │   ├── screens/
+│       │   │   └── pending_items_screen.dart  # شاشة موحدة لعرض وتعديل المعلقات
+│       │   └── services/
+│       │       └── pending_service.dart       # خدمة الوصول الموحد للمعلقات
 │       └── teacher_profile/
 │           └── screens/
 │               ├── profile_screen.dart
@@ -203,16 +208,16 @@ myhalaqat_flutter/
 
 **الملف:** `lib/core/database/database_helper.dart`
 
-**الإصدار الحالي:** 6
+**الإصدار الحالي:** 7
 
 ### جداول الكاش (Cache):
 - `cached_students` — الطلاب مع `sync_status` و `deleted_at` (للمؤرشفين)
 - `cached_memorizations` — سجل الحفظ
 
 ### جداول العمليات المعلقة:
-- `pending_attendance` — الحضور
-- `pending_memorizations` — الحفظ
-- `pending_quiz_requests` — طلبات السبر
+- `pending_attendance` — الحضور (مع `last_error` لتخزين أخطاء المزامنة)
+- `pending_memorizations` — الحفظ (مع `last_error`)
+- `pending_quiz_requests` — طلبات السبر (مع `last_error`)
 
 ### جداول المزامنة:
 - `sync_queue` — قائمة انتظار المزامنة العامة
@@ -224,6 +229,7 @@ myhalaqat_flutter/
 - **v3→v4:** إضافة total_points، attendance_count، total_sessions لـ cached_students
 - **v4→v5:** إنشاء جدول sync_log
 - **v5→v6:** إضافة عمود notes لـ pending_memorizations
+- **v6→v7:** إضافة عمود last_error لجميع جداول pending
 
 ## 7. مرجع API
 
@@ -282,7 +288,7 @@ AuthWrapper
 
 **الموقع:** `test/phase1_fixes_test.dart`
 
-**إجمالي الاختبارات:** 56 اختبار وحدة (unit tests)
+**إجمالي الاختبارات:** 61 اختبار وحدة (unit tests)
 
 ### مجاميع الاختبارات:
 
@@ -302,13 +308,115 @@ AuthWrapper
 | Edit Before Sync | تعديل السجلات قبل المزامنة |
 | Sync system | نظام المزامنة مع backoff |
 | CircleDetails enhancements | التحسينات الحالية |
+| Pending Sync v2 | تعافي المزامنة، عرض الأخطاء، إدارة المعلقات |
 
 ### ملف الاختبار الأساسي:
 `test/widget_test.dart` — اختبار بسيط يتأكد من أن التطبيق يعمل دون تعطل.
 
-## 10. أحدث التغييرات (آخر 3 تغييرات)
+## 10. أحدث التغييرات (آخر 4 تغييرات)
 
-### 1. إزالة عدد الطلاب من بطاقة الحلقة + عرض كامل لبطاقة السبر
+### 1. [جديد] تعبئة تلقائية لنموذج الحفظ + تسمية "الطلاب المفصولين من الحلقة"
+- **الملفات المعدلة:**
+  - `lib/features/students/screens/batch_memorization_screen.dart`:
+    - تعبئة تلقائية للسورة + آية البداية + آية النهاية من **آخر سجل حفظ على السيرفر** (`_lastRecords.first` من استجابة `?ordering=-date`)
+    - الترتيب: سجل السيرفر → الكاش المحلي (`last_memo_$studentId`) → الافتراضي
+    - يعمل عند تغيير الجهاز: الجهاز الجديد يجلب آخر سجل من السيرفر ويملأ النموذج تلقائياً
+    - لا يلمس النموذج إذا عدّله المستخدم أو أضاف نموذجاً آخر (مقارنة مع القيم الأولية)
+    - `_formFromRecord` يدعم `surah` (ID) مع fallback بالمطابقة بالاسم و`from_ayah/to_ayah` مع fallback لحقل `ayahs` بصيغة "1-7" وضبط الحدود داخل عدد آيات السورة
+  - `lib/features/circles/screens/circle_details_screen.dart`:
+    - تغيير تسمية القسم من "الطلاب المؤرشفين" إلى **"الطلاب المفصولين من الحلقة"**
+
+### 1. [جديد] كاش الميزات الجديدة للعمل دون اتصال (نفس نمط السجلات السابق)
+- **المبدأ:** إنترنت شغّال → جلب مباشر + تحديث الكاش | لا إنترنت → آخر نسخة محفوظة من SharedPreferences
+- **الملفات المعدلة:**
+  - `lib/features/students/services/student_stats_service.dart`:
+    - `getStudentStatsList` → كاش `cache_student_stats_{courseId}_{circleId}` للقائمة الكاملة (الترتيب + الأسهم + الهواتف + تواريخ الميلاد)
+    - `getStudentCourseReport` → كاش دائم `cache_course_report_{enrollmentId}` (كان كاش ذاكرة فقط يضيع عند الإغلاق)
+  - `lib/features/attendance/widgets/student_attendance_modal.dart`:
+    - سجل الحضور → كاش `cache_student_attendance_{enrollmentId}` (الصفحة الأولى؛ بلا اتصال يُعطّل "تحميل المزيد")
+    - المعلومات الشخصية → كاش `cache_student_info_{studentId}`
+  - `lib/features/students/screens/batch_memorization_screen.dart`:
+    - سجلات الحفظ الأخيرة → كاش `cache_last_memos_{enrollmentId}`
+- **مضاف مسبقاً (بدون تعديل):** الطلاب المؤرشفون (`cache_archived_enrollments_...`)، طلبات السبر (`cache_saber_requests_circle_...`)، شاشة الحلقات (`cached_circles_$courseId`)، تفاصيل الحلقة (`circle_details_$circleId`)، تفاصيل الدورة (SWR)
+
+### 1. [جديد] تحسين واجهة "إحصائيات الطلاب" — مفتاح ألوان ثابت + نقل زر النسخ
+- **الملف:** `lib/features/students/screens/student_statistics_screen.dart`
+- إزالة التسميات المكررة "الترتيب على الحلقة" و"الأسهم" من فوق كل بطاقة طالب
+- ترتيب العناصر: الترويسة (اسم الحلقة والعدد) ← زر النسخ ← مفتاح الألوان ← الجدول
+- مفتاح الألوان ملاصق للجدول مباشرة: شارة خضراء = "الترتيب على الحلقة"، شارة صفراء بنجمة = "الأسهم"
+- نقل زر النسخ من شريط AppBar إلى أعلى القائمة مباشرة (زر بارز بعرض كامل):
+  - النص: "نسخ اسماء الطلاب وارقام هواتفهم الى قائمة" + أيقونة النسخ
+  - يُظهر Spinner أثناء النسخ
+- إبقاء زر التحديث (refresh) في AppBar فقط
+
+### 1. [جديد] قسم "الطلاب المؤرشفين" في الواجهة الرئيسية للحلقة
+- **الملفات المعدلة:**
+  - `lib/features/circles/screens/circle_details_screen.dart`:
+    - قسم قابل للتوسع `_buildArchivedSection` أسفل شبكة أزرار الإجراءات مباشرة
+    - العنوان: "الطلاب المؤرشفين (N)" مع أيقونة أرشيف وسهم توسيع/طي
+    - بطاقة لكل طالب مؤرشف: الاسم + الهاتف + تاريخ التسجيل (`enrolled_at`) + تاريخ الأرشفة (`archived_at`)
+    - `SafeArea` حول المحتوى + هامش سفلي 32px لمنع التصاق المحتوى بحافة الشاشة
+    - عرض حالة التحميل (Spinner) وحالة "لا يوجد طلاب مؤرشفون"
+  - `lib/features/circles/services/circle_service.dart`:
+    - دالة جديدة `getArchivedStudents({courseId, circleId})` تجلب من `/api/enrollments/?course=X&status=archived` مع كاش محلي للعمل دون اتصال
+    - فلترة الحلقة محلياً لأن API لا يدعم فلتر `circle` (يرد 400) — يدعم `course` و`status` فقط
+- **ملاحظة:** فلتر `?circle=` في `/api/enrollments/` غير مدعوم من السيرفر (400)
+
+### 1. [جديد] تطوير شاشتي طلب السبر وسجل الطلبات
+- **الملفات المعدلة:**
+  - `lib/features/saber/screens/create_saber_request_screen.dart`:
+    - إلغاء القيم الافتراضية: `selectedPart` و`quizType` أصبحا `nullable` بلا تحديد مسبق + رسالة تحقق عند عدم الاختيار
+    - نافذة تأكيد `_showConfirmSendDialog` تعرض (الطالب، الجزء، النوع، الملاحظات) + "هل أنت متأكد من إرسال الطلب؟"
+    - منطق إرسال جديد يعتمد على `SaberSendResult` (sent/queued/failed)
+    - مؤشر حالة آخر طلب بجانب اسم الطالب: "طلب سبر - جزء X" (برتقالي)، "سبر ناجح/راسب - جزء X" (أخضر/أحمر)، "طلب مرفوض" (أحمر)
+    - عرض تاريخ الطلب في البطاقات المعلقة وفي تبويب سجل الطلبات
+  - `lib/features/saber/services/saber_service.dart`:
+    - إضافة `SaberSendStatus` + `SaberSendResult` لتصنيف نتيجة الإرسال بدقة
+    - `createSaberRequestOnline` الجديدة: نجاح 2xx → sent | خطأ شبكة (بلا رد) → فحص تكرار ثم حفظ محلي → queued | خطأ HTTP من السيرفر → failed بدون حفظ محلي (منع التكرار)
+    - `_checkRequestExistsOnServer` للتحقق من وصول الطلب فعلاً قبل الحفظ المحلي (منع الإرسال المزدوج)
+    - `_translateDioError` لترجمة أخطاء السيرفر للعربية
+  - `lib/features/saber/screens/saber_requests_screen.dart`:
+    - 5 فلاتر حالة: الكل، معلق، ناجح، راسب، مرفوض (فصل الناجح عن الراسب حسب نسبة 50%)
+    - التواريخ الصحيحة: معلق → `requested_at` (تاريخ الطلب) | مكتمل → `completed_at` (تاريخ السبر)
+    - شارة الحالة تعرض "ناجح"/"راسب" بدل "مكتمل"
+  - `lib/core/network/api_client.dart` — إصلاح جذري لـ `isReallyOnline()`:
+    - كانت تستخدم Dio بدون توكن → `/api/courses/` يرد 401 → ترجع false رغم وجود الإنترنت → يُحفظ طلب السبر محلياً خطأً
+    - الآن تستخدم `ApiClient().dio` (مع التوكن) و`validateStatus` لتعتبر أي رد من السيرفر دليل اتصال
+    - إزالة اعتبار `ConnectivityResult.other` انقطاعاً (كان يخطئ مع VPN)
+  - `lib/features/students/screens/batch_memorization_screen.dart` — إزالة كود التتبع، عرض آخر 3 سجلات حفظ افتراضياً + "عرض المزيد"
+  - `lib/features/circles/services/course_service.dart` — كاش أولاً + تحديث بالخلفية (Stale-While-Revalidate) لتفاصيل الدورة
+
+### 1. [جديد] نظام المزامنة المحسّن v3 — ترجمة الأخطاء، مهلة زمنية، فشل فوري بدون تعليق
+- **التعديلات على الملفات الموجودة:**
+  - `lib/core/network/sync_manager.dart` — تغيير جذري في معالجة الأخطاء:
+    - إضافة `_translateError()` لترجمة أخطاء Django REST Framework إلى رسائل عربية واضحة
+    - إضافة `_extractFieldErrors()` لاستخراج أخطاء الحقول الفردية (مثل: "الطالب: الحقل مطلوب")
+    - إضافة `_fieldNameArabic()` لترجمة أسماء الحقول (enrollment ← الطالب، status ← حالة الحضور)
+    - إضافة `.timeout(15s)` لجميع طلبات Dio لمنع التعليق إلى الأبد
+    - الفشل الآن فوري: أي خطأ يؤدي إلى status='failed' مباشرة (لا إعادة محاولة تلقائية)
+    - معالجة TimeoutException بشكل منفصل عن DioException
+    - رسائل مفهومة: "انتهت مهلة الاتصال"، "السيرفر لم يستجب"، "البيانات المرسلة غير صالحة"
+- **الوظائف الجديدة:**
+  - ترجمة جميع أخطاء السيرفر إلى العربية مع عرض اسم الحقل المخطئ
+  - مهلة زمنية 15 ثانية لكل طلب — بعدها فشل فوري
+  - لا يبقى أي عنصر في حالة "جارٍ الإرسال" دون مصير محدد
+- **الملفات المعنية:**
+  - `lib/core/database/database_helper.dart` — v7 إضافة عمود `last_error`
+  - `lib/core/network/sync_manager.dart` — تخزين `last_error` عند فشل الإرسال، طابور انتظار بدلاً من إسقاط المزامنات
+  - `lib/features/pending/services/pending_service.dart` — [جديد] خدمة موحدة للمعلقات
+  - `lib/features/pending/screens/pending_items_screen.dart` — [جديد] شاشة موحدة لعرض/تعديل/حذف/إعادة محاولة المعلقات
+  - `lib/features/attendance/screens/circle_attendance_record_screen.dart` — دمج السجلات المعلقة مع API + عرض وسم "معلق/فاشل"
+  - `lib/features/students/screens/circle_memorization_record_screen.dart` — دمج السجلات المعلقة مع API + عرض وسم "معلق/فاشل"
+  - `lib/core/widgets/sync_indicator.dart` — إضافة `onViewPending` callback للانتقال لشاشة المعلقات
+  - `lib/features/dashboard/screens/home_screen.dart` — إضافة زر التنقل إلى شاشة المعلقات
+  - `lib/features/circles/screens/circle_details_screen.dart` — إضافة زر التنقل إلى شاشة المعلقات
+- **الوظائف الجديدة:**
+  - عرض السجلات المعلقة (غير المتزامنة) في سجل الحضور وسجل الحفظ مع وسم "معلق"
+  - تخزين رسالة الخطأ من السيرفر (401/500/إلخ) في `last_error` وعرضها للمستخدم
+  - شاشة موحدة PendingItemsScreen تعرض جميع المعلقات مع إمكانية التعديل والحذف وإعادة المحاولة
+  - طابور مزامنة ذكي: إذا كانت المزامنة قيد التشغيل، تُسجل طلبات المزامنة الجديدة وتُنفذ تلقائياً بعد انتهاء الجولة الحالية (بدلاً من إسقاطها)
+
+### 2. إزالة عدد الطلاب من بطاقة الحلقة + عرض كامل لبطاقة السبر
 - **الملف:** `lib/features/circles/screens/circle_details_screen.dart`
 - إزالة `students_count` من بطاقة رأس الحلقة في `_buildCircleHeader` (طلب المستخدم)
 - إصلاح عرض بطاقة "طلب سبر" لتأخذ العرض الكامل باستخدام `SizedBox(width: double.infinity)` بدلاً من `Expanded` — السطر 140-150
@@ -333,6 +441,10 @@ AuthWrapper
 - بطاقة طلب السبر في `CircleDetailsScreen` تعمل بـ `SizedBox` بدلاً من `Expanded` لتجنب الخطأ — قد تحتاج مراجعة لاتساق التصميم
 - التاريخ المستقبلي يُمنع في AttendanceScreen لكن المقارنة قد لا تكون دقيقة في كل المناطق الزمنية
 - عند حذف طالب من السيرفر، يبقى في الكاش المحلي 30 يوماً قبل الحذف النهائي
+- صفحة `_EditPendingMemorizationPage` مكررة في ملفين — يُفضل استخراجها لملف مشترك مستقبلاً
+- `cached_courses` في SharedPreferences تُقرأ في `PendingService._getCourseName()` — إذا لم يكن الكاش متاحاً، يظهر "دورة $courseId"
+- فلترة التاريخ في PendingItemsScreen تعمل محلياً فقط (تطابق تام مع `date`) — لا تظهر نطاق تواريخ
+- `_retryFailedWithBackoff` يعيد محاولة العناصر الفاشلة بسبب timeout/500 بعد 60-1920 ثانية — قد يرى المستخدم العنصر ينتقل من "فاشل" إلى "معلق" دون تدخل منه
 
 ### خطوات مقترحة:
 - إضافة اختبارات واجهة المستخدم (Widget Tests) للشاشات الرئيسية

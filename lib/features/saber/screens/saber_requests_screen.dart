@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:myhalaqat/features/saber/services/saber_service.dart';
 
 class SaberRequestsScreen extends StatefulWidget {
-  const SaberRequestsScreen({Key? key}) : super(key: key);
+  final int circleId;
+  const SaberRequestsScreen(Key? key, this.circleId) : super(key: key);
 
   @override
   State<SaberRequestsScreen> createState() => _SaberRequestsScreenState();
@@ -17,17 +18,26 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
   bool _isLoading = true;
   List<dynamic> _allRequests = [];
 
+  /// نسبة النجاح في الطلب المكتمل
+  double _percentage(dynamic r) {
+    final score = double.tryParse((r['admin_score'] ?? '').toString()) ?? 0;
+    final max = double.tryParse((r['admin_max_score'] ?? '').toString()) ?? 100;
+    return max > 0 ? (score / max * 100) : 0;
+  }
+
   List<dynamic> get _pendingRequests =>
       _allRequests.where((r) => r['status'] == 'pending').toList();
-  List<dynamic> get _completedRequests =>
-      _allRequests.where((r) => r['status'] == 'completed').toList();
+  List<dynamic> get _passedRequests =>
+      _allRequests.where((r) => r['status'] == 'completed' && _percentage(r) >= 50).toList();
+  List<dynamic> get _failedRequests =>
+      _allRequests.where((r) => r['status'] == 'completed' && _percentage(r) < 50).toList();
   List<dynamic> get _rejectedRequests =>
       _allRequests.where((r) => r['status'] == 'rejected').toList();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _fetchRequests();
   }
 
@@ -39,7 +49,7 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
 
   Future<void> _fetchRequests() async {
     setState(() => _isLoading = true);
-    final data = await _saberService.getMySaberRequests();
+    final data = await _saberService.getMySaberRequests(widget.circleId);
     if (mounted) {
       setState(() {
         _allRequests = data;
@@ -59,9 +69,10 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
           isScrollable: true,
           tabs: [
             Tab(text: 'الكل (${_allRequests.length})'),
-            Tab(text: 'معلقة (${_pendingRequests.length})'),
-            Tab(text: 'مكتملة (${_completedRequests.length})'),
-            Tab(text: 'مرفوضة (${_rejectedRequests.length})'),
+            Tab(text: 'معلق (${_pendingRequests.length})'),
+            Tab(text: 'ناجح (${_passedRequests.length})'),
+            Tab(text: 'راسب (${_failedRequests.length})'),
+            Tab(text: 'مرفوض (${_rejectedRequests.length})'),
           ],
         ),
       ),
@@ -72,7 +83,8 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
               children: [
                 _buildList(_allRequests),
                 _buildList(_pendingRequests),
-                _buildList(_completedRequests),
+                _buildList(_passedRequests),
+                _buildList(_failedRequests),
                 _buildList(_rejectedRequests),
               ],
             ),
@@ -106,36 +118,71 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
     );
   }
 
+  /// التاريخ المناسب حسب حالة الطلب:
+  /// معلق → تاريخ الطلب | مكتمل (ناجح/راسب) → تاريخ السبر
+  String _displayDate(Map<String, dynamic> req) {
+    final status = req['status'];
+    final isDone = status == 'completed';
+    final requestedAt = req['requested_at']?.toString() ?? '';
+    final completedAt = req['completed_at']?.toString() ?? '';
+    final raw = (isDone && completedAt.isNotEmpty) ? completedAt : requestedAt;
+    final date = raw.split(' ')[0].split('T')[0];
+    if (date.isEmpty) return '';
+    final label = (isDone && completedAt.isNotEmpty) ? 'تاريخ السبر' : 'تاريخ الطلب';
+    return '$label: $date';
+  }
+
   Widget _buildRequestCard(Map<String, dynamic> req) {
     final String studentName = req['student_name'] ?? 'بدون اسم';
     final String quizType = req['quiz_type'] == 'new' ? 'جديد' : 'مراجعة';
-    final String content = req['part_name'] ?? 'غير محدد';
-    final String date = req['requested_at']?.toString().split(' ')[0] ?? '';
+    final String content = req['part_name'] ?? req['quran_part']?.toString() ?? 'غير محدد';
+    final String date = _displayDate(req);
     final String teacherNotes = req['teacher_notes'] ?? '';
     final String? adminNotes = req['admin_notes'];
-    final bool isPending = req['status'] == 'pending';
     final bool isLocal = req['is_local'] == true;
+    final bool isSynced = req['sync_status'] == 'synced';
+    final bool isFailed = req['sync_status'] == 'failed';
 
-    // --- لون وأيقونة الحالة ---
-    Color statusColor;
-    IconData statusIcon;
-    String statusText;
+    // --- لون وأيقونة الحالة (حسب السيرفر) ---
+    Color serverStatusColor;
+    IconData serverStatusIcon;
+    String serverStatusText;
 
     switch (req['status']) {
       case 'completed':
-        statusColor = Colors.green;
-        statusIcon = Icons.check_circle_outline;
-        statusText = 'مكتمل';
+        final passed = _percentage(req) >= 50;
+        serverStatusColor = passed ? Colors.green : Colors.red;
+        serverStatusIcon = passed ? Icons.check_circle_outline : Icons.cancel_outlined;
+        serverStatusText = passed ? 'ناجح' : 'راسب';
         break;
       case 'rejected':
-        statusColor = Colors.red;
-        statusIcon = Icons.cancel_outlined;
-        statusText = 'مرفوض';
+        serverStatusColor = Colors.red;
+        serverStatusIcon = Icons.cancel_outlined;
+        serverStatusText = 'مرفوض';
         break;
       default:
-        statusColor = isLocal ? Colors.blue : Colors.orange;
-        statusIcon = isLocal ? Icons.cloud_upload_outlined : Icons.hourglass_empty;
-        statusText = isLocal ? 'بانتظار الرفع' : 'معلق (في الإدارة)';
+        serverStatusColor = isLocal ? Colors.grey : Colors.orange;
+        serverStatusIcon = isLocal ? Icons.hourglass_empty : Icons.hourglass_empty;
+        serverStatusText = isLocal ? 'معلق' : 'معلق (في الإدارة)';
+    }
+
+    // --- حالة المزامنة (محلي/سيرفر) ---
+    Color syncColor;
+    IconData syncIcon;
+    String syncText;
+    if (isLocal && isFailed) {
+      syncColor = Colors.red;
+      syncIcon = Icons.error;
+      syncText = 'فشل الإرسال';
+    } else if (isLocal) {
+      syncColor = Colors.blue;
+      syncIcon = Icons.hourglass_empty;
+      syncText = 'بانتظار المزامنة';
+    } else {
+      // من السيرفر → تم الإرسال بنجاح
+      syncColor = Colors.green;
+      syncIcon = Icons.check_circle;
+      syncText = 'تم الإرسال';
     }
 
     // --- نتيجة السبر ---
@@ -156,15 +203,15 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.05),
+              color: serverStatusColor.withOpacity(0.05),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-              border: Border(bottom: BorderSide(color: statusColor.withOpacity(0.2))),
+              border: Border(bottom: BorderSide(color: serverStatusColor.withOpacity(0.2))),
             ),
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: statusColor.withOpacity(0.1),
-                  child: Icon(Icons.person, color: statusColor),
+                  backgroundColor: serverStatusColor.withOpacity(0.1),
+                  child: Icon(Icons.person, color: serverStatusColor),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -176,20 +223,36 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: syncColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(syncIcon, color: syncColor, size: 11),
+                      const SizedBox(width: 3),
+                      Text(syncText, style: TextStyle(color: syncColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ]),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(statusIcon, color: statusColor, size: 14),
-                      const SizedBox(width: 4),
-                      Text(statusText, style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                    ],
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: serverStatusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(serverStatusIcon, color: serverStatusColor, size: 14),
+                        const SizedBox(width: 4),
+                        Text(serverStatusText, style: TextStyle(color: serverStatusColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ),
-                ),
+                ]),
               ],
             ),
           ),
@@ -266,8 +329,8 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
             ),
           ),
 
-          // --- أزرار التعديل والحذف للمعلق فقط ---
-          if (isPending)
+          // --- أزرار التعديل والحذف للمعلق محلياً أو الفاشل ---
+          if (isLocal || isFailed)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(

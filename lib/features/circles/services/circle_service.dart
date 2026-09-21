@@ -48,4 +48,35 @@ class CircleService {
       return null;
     }
   }
+
+  /// جلب الطلاب المؤرشفين في الدورة (مع فلترة الحلقة محلياً)
+  /// ملاحظة: API لا يدعم فلتر circle — يدعم course و status فقط
+  Future<List<dynamic>> getArchivedStudents({required int courseId, int? circleId}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final cacheKey = 'cache_archived_enrollments_${courseId}_${circleId ?? 'all'}';
+    List<dynamic> result = [];
+    try {
+      final response = await _dio.get('/api/enrollments/', queryParameters: {
+        'course': courseId,
+        'status': 'archived',
+      });
+      if (response.statusCode == 200) {
+        result = response.data['results'] ?? [];
+        await prefs.setString(cacheKey, jsonEncode(result));
+      }
+    } catch (e) {
+      print('⚠️ تعذر جلب الطلاب المؤرشفين، سيتم العرض من الكاش: $e');
+      final cached = prefs.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        try {
+          result = jsonDecode(cached);
+        } catch (_) {}
+      }
+    }
+    // فلترة حسب الحلقة الحالية (الـ API لا يدعم فلتر circle)
+    if (circleId != null) {
+      result = result.where((e) => e is Map && e['circle'] == circleId).toList();
+    }
+    return result;
+  }
 }

@@ -22,7 +22,7 @@ class SyncManager {
 
   Timer? _periodicTimer;
   bool _isSyncing = false;
-  static const int MAX_RETRIES = 5;
+  bool _needsResync = false;
 
   SyncManager._init() {
     // 1. الاستماع لتغيرات الشبكة الفورية
@@ -48,8 +48,23 @@ class SyncManager {
   // الدالة الرئيسية التي تشغل كل عمليات المزامنة
   Future<SyncResult> syncAll() async {
     final result = SyncResult();
-    if (_isSyncing) return result; // منع التداخل إذا كانت المزامنة تعمل بالفعل
+
+    // إذا كان الجهاز غير متصل بالشبكة نهائياً، لا نقوم بالمزامنة (نمنع تحول المعلقات إلى فاشل)
+    try {
+      final netResult = await Connectivity().checkConnectivity();
+      if (netResult.contains(ConnectivityResult.none)) {
+        final pendingCount = await _countPending();
+        pendingCountNotifier.value = pendingCount;
+        return result;
+      }
+    } catch (_) {}
+
+    if (_isSyncing) {
+      _needsResync = true;
+      return result; // تسجيل طلب مزامنة بدلاً من إسقاطه
+    }
     _isSyncing = true;
+    _needsResync = false;
     final startedAt = DateTime.now().toIso8601String();
 
     try {
@@ -64,15 +79,16 @@ class SyncManager {
         _cleanupSyncedItems();
       }
 
-      // تحديث عداد المعلقات في الواجهة
-      if (result.successCount > 0 || result.failCount > 0) {
-        final pendingCount = await _countPending();
-        pendingCountNotifier.value = pendingCount;
-      }
+      // تحديث عداد المعلقات في الواجهة دائماً (وليس فقط عند وجود نجاح/فشل)
+      final pendingCount = await _countPending();
+      pendingCountNotifier.value = pendingCount;
     } catch (e) {
       print('🚨 خطأ عام في محرك المزامنة: $e');
     } finally {
       _isSyncing = false;
+      if (_needsResync) {
+        syncAll();
+      }
     }
 
     // تسجيل عملية المزامنة في sync_log
@@ -107,11 +123,24 @@ class SyncManager {
       'pending_memorizations',
       'pending_quiz_requests',
     ];
+    final fiveMinAgo = DateTime.now().subtract(const Duration(minutes: 5)).toIso8601String();
 
     for (final table in tables) {
+      // استعادة العناصر العالقة في حالة 'sending' لأكثر من 5 دقائق
+      try {
+        final stuck = await _db.queryWhere(table, 'sync_status = ? AND last_attempt_at < ?', ['sending', fiveMinAgo]);
+        for (final s in stuck) {
+          await _db.update(table, {'sync_status': 'pending', 'last_error': '[CLIENT_ERROR] تم قطع الاتصال أثناء الإرسال، حاول مرة أخرى'}, 'id = ?', [s['id']]);
+        }
+      } catch (_) {}
+
       final failed = await _db.queryWhere(table, 'sync_status = ?', ['failed']);
 
       for (final item in failed) {
+        final lastError = item['last_error'] as String? ?? '';
+        // لا نعيد محاولة أخطاء العميل (4xx) — تخطيها
+        if (lastError.startsWith('[CLIENT_ERROR]')) continue;
+
         final retryCount = item['retry_count'] as int;
         // استخدام last_attempt_at إن وُجد، وإلا fallback إلى created_at
         final lastAttempt =
@@ -121,11 +150,11 @@ class SyncManager {
         final waitSeconds = _backoffSeconds(retryCount);
         final nextRetry = lastAttemptTime.add(Duration(seconds: waitSeconds));
 
-        // إذا حان وقت إعادة المحاولة — نعيد تعيين retry_count
+        // إذا حان وقت إعادة المحاولة — نعيد تعيين إلى pending ونبقي الخطأ ليعلم المستخدم سبب المشكلة
         if (DateTime.now().isAfter(nextRetry)) {
           await _db.update(
             table,
-            {'sync_status': 'pending', 'retry_count': 0},
+            {'sync_status': 'pending', 'retry_count': 0, 'last_attempt_at': DateTime.now().toIso8601String()},
             'id = ?',
             [item['id']],
           );
@@ -135,8 +164,8 @@ class SyncManager {
   }
 
   int _backoffSeconds(int retryCount) {
-    // 5, 25, 125, 625, 3125 ثانية
-    return (5 * _pow(5, retryCount)).clamp(5, 3125).toInt();
+    // 30, 60, 120, 240, 480 ثانية (نصف دقيقة، دقيقة، 2، 4، 8 دقائق)
+    return (30 * _pow(2, retryCount)).clamp(30, 1800).toInt();
   }
 
   double _pow(int base, int exp) {
@@ -153,8 +182,8 @@ class SyncManager {
   Future<void> _syncAttendance(SyncResult result) async {
     final pending = await _db.queryWhere(
       'pending_attendance',
-      'sync_status = ? AND retry_count < ?',
-      ['pending', MAX_RETRIES],
+      '(sync_status = ? OR sync_status = ?)',
+      ['pending', 'sending'],
     );
 
     if (pending.isEmpty) return;
@@ -187,7 +216,7 @@ class SyncManager {
             'date': group.first['date'],
             'records': records,
           },
-        );
+        ).timeout(const Duration(seconds: 15));
 
         // استخراج server_id من الاستجابة إن وُجد
         final serverIds = <int>{};
@@ -209,19 +238,24 @@ class SyncManager {
         );
         result.successCount += group.length;
       } catch (e) {
-        final newRetryCount = (group.first['retry_count'] as int) + 1;
-        final newStatus = newRetryCount >= MAX_RETRIES ? 'failed' : 'pending';
+        final errorMsg = _translateError(e);
+        // إذا كان الخطأ "موجود مسبقاً"، نعتبر المزامنة ناجحة (السجل موجود فعلاً في السيرفر)
+        final isDuplicate = errorMsg.contains('موجود مسبقاً') || errorMsg.contains('already exists');
         await _db.update(
           'pending_attendance',
           {
-            'sync_status': newStatus,
-            'retry_count': newRetryCount,
+            'sync_status': isDuplicate ? 'synced' : 'failed',
             'last_attempt_at': now,
+            'last_error': isDuplicate ? null : errorMsg,
           },
           'id IN ($placeholders)',
           ids,
         );
-        result.failCount += group.length;
+        if (isDuplicate) {
+          result.successCount += group.length;
+        } else {
+          result.failCount += group.length;
+        }
       }
     }
   }
@@ -232,8 +266,8 @@ class SyncManager {
   Future<void> _syncMemorizations(SyncResult result) async {
     final pending = await _db.queryWhere(
       'pending_memorizations',
-      'sync_status = ? AND retry_count < ?',
-      ['pending', MAX_RETRIES],
+      '(sync_status = ? OR sync_status = ?)',
+      ['pending', 'sending'],
     );
 
     if (pending.isEmpty) return;
@@ -274,7 +308,7 @@ class SyncManager {
         final response = await _dio.post(
           '/api/memorizations/batch/',
           data: {'records': records},
-        );
+        ).timeout(const Duration(seconds: 15));
         print('📥 استجابة الحفظ: ${response.statusCode} ${response.data}');
 
         // استخراج server_id من الاستجابة إن وُجد
@@ -297,24 +331,23 @@ class SyncManager {
         );
         result.successCount += group.length;
       } catch (e) {
-        print('❌ فشل إرسال الحفظ: $e');
-        if (e is DioException) {
-          print('   الحالة: ${e.response?.statusCode}');
-          print('   الرد: ${e.response?.data}');
-        }
-        final newRetryCount = (group.first['retry_count'] as int) + 1;
-        final newStatus = newRetryCount >= MAX_RETRIES ? 'failed' : 'pending';
+        final errorMsg = _translateError(e);
+        final isDuplicate = errorMsg.contains('موجود مسبقاً') || errorMsg.contains('already exists');
         await _db.update(
           'pending_memorizations',
           {
-            'sync_status': newStatus,
-            'retry_count': newRetryCount,
+            'sync_status': isDuplicate ? 'synced' : 'failed',
             'last_attempt_at': now,
+            'last_error': isDuplicate ? null : errorMsg,
           },
           'id IN ($placeholders)',
           ids,
         );
-        result.failCount += group.length;
+        if (isDuplicate) {
+          result.successCount += group.length;
+        } else {
+          result.failCount += group.length;
+        }
       }
     }
   }
@@ -325,8 +358,8 @@ class SyncManager {
   Future<void> _syncQuizRequests(SyncResult result) async {
     final pending = await _db.queryWhere(
       'pending_quiz_requests',
-      'sync_status = ? AND retry_count < ?',
-      ['pending', MAX_RETRIES],
+      '(sync_status = ? OR sync_status = ?)',
+      ['pending', 'sending'],
     );
 
     if (pending.isEmpty) return;
@@ -349,7 +382,7 @@ class SyncManager {
             "quiz_type": req['quiz_type'],
             "teacher_notes": req['teacher_notes'],
           },
-        );
+        ).timeout(const Duration(seconds: 15));
 
         await _db.update(
           'pending_quiz_requests',
@@ -359,19 +392,23 @@ class SyncManager {
         );
         result.successCount += 1;
       } catch (e) {
-        final newRetryCount = (req['retry_count'] as int) + 1;
-        final newStatus = newRetryCount >= MAX_RETRIES ? 'failed' : 'pending';
+        final errorMsg = _translateError(e);
+        final isDuplicate = errorMsg.contains('موجود مسبقاً') || errorMsg.contains('already exists');
         await _db.update(
           'pending_quiz_requests',
           {
-            'sync_status': newStatus,
-            'retry_count': newRetryCount,
+            'sync_status': isDuplicate ? 'synced' : 'failed',
             'last_attempt_at': now,
+            'last_error': isDuplicate ? null : errorMsg,
           },
           'id = ?',
           [req['id']],
         );
-        result.failCount += 1;
+        if (isDuplicate) {
+          result.successCount += 1;
+        } else {
+          result.failCount += 1;
+        }
       }
     }
   }
@@ -512,6 +549,150 @@ class SyncManager {
       total += items.length;
     }
     return total;
+  }
+
+  // ترجمة أخطاء السيرفر إلى رسائل مفهومة للمستخدم
+  String _translateError(dynamic e) {
+    // 1. Timeout
+    if (e is TimeoutException) {
+      return 'انتهت مهلة الاتصال — تحقق من اتصالك بالإنترنت وحاول مرة أخرى';
+    }
+
+    // 2. DioException
+    if (e is DioException) {
+      final statusCode = e.response?.statusCode ?? 0;
+      final data = e.response?.data;
+
+      // رسائل حسب حالة HTTP
+      switch (statusCode) {
+        case 400: return '[CLIENT_ERROR] ${_extractFieldErrors(data, 'البيانات المرسلة غير صالحة — راجع الحقول الملونة')}';
+        case 401: return '[CLIENT_ERROR] انتهت صلاحية الجلسة — يرجى تسجيل الدخول مرة أخرى';
+        case 403: return '[CLIENT_ERROR] لا تملك صلاحية تنفيذ هذا الإجراء';
+        case 404: return '[CLIENT_ERROR] العنصر المطلوب غير موجود على السيرفر';
+        case 409: return '[CLIENT_ERROR] تعارض في البيانات — السجل موجود مسبقاً';
+        case 429: return 'تم تجاوز عدد الطلبات المسموح بها — حاول لاحقاً';
+        case 500: return 'خطأ داخلي في السيرفر — حاول مرة أخرى لاحقاً';
+        case 502: return 'السيرفر غير متاح مؤقتاً — حاول مرة أخرى';
+        case 503: return 'خدمة السيرفر غير متاحة حالياً';
+      }
+
+      // رسائل حسب نوع الخطأ
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+          return 'انتهت مهلة الاتصال — تحقق من اتصالك بالإنترنت وحاول مرة أخرى';
+        case DioExceptionType.receiveTimeout:
+          return 'السيرفر لم يستجب — تحقق من اتصالك وحاول مرة أخرى';
+        case DioExceptionType.connectionError:
+          return 'تعذر الاتصال بالسيرفر — تحقق من اتصالك بالإنترنت';
+        case DioExceptionType.badResponse:
+          return '[CLIENT_ERROR] ${_extractFieldErrors(data, 'خطأ $statusCode من السيرفر')}';
+        default:
+          return 'خطأ في الاتصال — تحقق من اتصالك بالإنترنت';
+      }
+    }
+
+    // 3. أي خطأ آخر
+    final msg = e.toString();
+    if (msg.length > 150) return msg.substring(0, 150);
+    return msg;
+  }
+
+  // استخراج رسائل الخطأ من حقول الاستجابة (Django REST Framework format)
+  String _extractFieldErrors(dynamic data, String fallback) {
+    if (data == null) return fallback;
+    try {
+      if (data is String) return _translateDjangoMessage(data);
+      if (data is List) return data.map((e) => _translateDjangoMessage(e.toString())).join(' | ');
+      if (data is Map) {
+        if (data['detail'] != null) return _translateDjangoMessage(data['detail'].toString());
+        if (data['message'] != null) return _translateDjangoMessage(data['message'].toString());
+        if (data['non_field_errors'] != null) {
+          final errors = data['non_field_errors'] as List;
+          if (errors.isNotEmpty) return _translateDjangoMessage(errors.first.toString());
+        }
+        final messages = <String>[];
+        for (final entry in data.entries) {
+          final fieldName = _fieldNameArabic(entry.key);
+          final value = entry.value;
+          if (value is List && value.isNotEmpty) {
+            final translated = value.map((e) => _translateDjangoMessage(e.toString())).join(', ');
+            messages.add('$fieldName: $translated');
+          } else if (value is String) {
+            messages.add('$fieldName: ${_translateDjangoMessage(value)}');
+          }
+        }
+        if (messages.isNotEmpty) return messages.join(' | ');
+      }
+    } catch (_) {}
+    return fallback;
+  }
+
+  // ترجمة رسائل Django المعروفة إلى العربية
+  String _translateDjangoMessage(String msg) {
+    if (msg.contains('Invalid pk') || msg.contains('object does not exist')) {
+      return 'الطالب غير موجود في النظام';
+    }
+    if (msg.contains('is not a valid choice')) {
+      final start = msg.indexOf('"') + 1;
+      final end = msg.indexOf('"', start);
+      if (start > 0 && end > start) {
+        final val = msg.substring(start, end);
+        return '"$val" ليس اختياراً صالحاً';
+      }
+      return 'قيمة غير صالحة';
+    }
+    if (msg.contains('This field is required') || msg.contains('may not be blank') || msg.contains('may not be null')) {
+      return 'هذا الحقل مطلوب';
+    }
+    if (msg.contains('already exists') || msg.contains('must make a unique set') || msg.contains('unique set') || msg.contains('مجموعة فريدة')) {
+      return 'السجل موجود مسبقاً';
+    }
+    if (msg.contains('Ensure this field has at least')) {
+      return 'القيمة قصيرة جداً';
+    }
+    if (msg.contains('Ensure this field has no more than')) {
+      return 'القيمة طويلة جداً';
+    }
+    if (msg.contains('Enter a valid')) {
+      return 'القيمة المدخلة غير صالحة';
+    }
+    if (msg.contains('No')) {
+      return 'لا يوجد عنصر مطابق';
+    }
+    if (msg.contains('not found')) {
+      return 'العنصر غير موجود';
+    }
+    if (msg.contains('is not a valid') || msg.contains('invalid')) {
+      return 'قيمة غير صالحة';
+    }
+    return msg;
+  }
+
+  // ترجمة أسماء الحقول إلى العربية
+  String _fieldNameArabic(String field) {
+    switch (field) {
+      case 'enrollment': return 'الطالب';
+      case 'enrollment_id': return 'الطالب';
+      case 'student_name': return 'اسم الطالب';
+      case 'status': return 'حالة الحضور';
+      case 'date': return 'التاريخ';
+      case 'circle': return 'الحلقة';
+      case 'circle_id': return 'الحلقة';
+      case 'course': return 'الدورة';
+      case 'surah': return 'السورة';
+      case 'surah_id': return 'السورة';
+      case 'from_ayah': return 'من الآية';
+      case 'to_ayah': return 'إلى الآية';
+      case 'type': return 'النوع';
+      case 'result': return 'النتيجة';
+      case 'notes': return 'الملاحظات';
+      case 'quiz_type': return 'نوع السبر';
+      case 'quran_part': return 'الجزء';
+      case 'quran_part_id': return 'الجزء';
+      case 'teacher_notes': return 'ملاحظات المعلم';
+      case 'records': return 'سجلات الحضور';
+      default: return field;
+    }
   }
 
   // دالة مساعدة لتجميع البيانات (Grouping)

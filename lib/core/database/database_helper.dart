@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -76,7 +76,8 @@ class DatabaseHelper {
         retry_count INTEGER DEFAULT 0,
         action TEXT DEFAULT 'create',
         server_id INTEGER,
-        last_attempt_at TEXT
+        last_attempt_at TEXT,
+        last_error TEXT
       )
     ''');
 
@@ -97,7 +98,8 @@ class DatabaseHelper {
         retry_count INTEGER DEFAULT 0,
         action TEXT DEFAULT 'create',
         server_id INTEGER,
-        last_attempt_at TEXT
+        last_attempt_at TEXT,
+        last_error TEXT
       )
     ''');
 
@@ -112,7 +114,8 @@ class DatabaseHelper {
         sync_status TEXT DEFAULT 'pending',
         retry_count INTEGER DEFAULT 0,
         action TEXT DEFAULT 'create',
-        last_attempt_at TEXT
+        last_attempt_at TEXT,
+        last_error TEXT
       )
     ''');
 
@@ -191,6 +194,17 @@ class DatabaseHelper {
       } catch (e) {
         // العمود قد يكون موجوداً مسبقاً (تمت الترقية جزئياً)
       }
+    }
+    if (oldVersion < 7) {
+      try {
+        await db.execute('ALTER TABLE pending_attendance ADD COLUMN last_error TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE pending_memorizations ADD COLUMN last_error TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE pending_quiz_requests ADD COLUMN last_error TEXT');
+      } catch (_) {}
     }
   }
 

@@ -5,6 +5,10 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:myhalaqat/core/network/sync_manager.dart';
+import 'package:myhalaqat/core/services/background_sync_service.dart';
+import 'package:myhalaqat/core/utils/app_state_helper.dart';
+import 'dart:io';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:myhalaqat/core/theme/app_theme.dart';
 import 'package:myhalaqat/core/notifiers/app_notifiers.dart';
 import 'package:myhalaqat/features/auth/screens/auth_wrapper.dart';
@@ -45,35 +49,82 @@ void main() async {
   // تحميل ملف البيئة الأساسي
   await dotenv.load(fileName: ".env");
 
-  // 1. نقرأ الذاكرة فقط
-  final prefs = await SharedPreferences.getInstance();
+  // حفظ BASE_URL والإصدار في SharedPreferences للوصول إليه من العزل الخلفي
+  final baseUrl = dotenv.env['BASE_URL'] ?? 'http://10.0.2.2:8000';
+  final initPrefs = await SharedPreferences.getInstance();
+  await initPrefs.setString('cached_base_url', baseUrl);
+  await initPrefs.setString('app_version', '1.1.2');
+  final prefs = initPrefs;
   final isDarkMode = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
 
-  // 2. تسجيل WorkManager للخلفية
-  await Workmanager().initialize(callbackDispatcher);
-  await Workmanager().registerPeriodicTask(
-    'myhalaqat-sync',
-    'backgroundSync',
-    frequency: const Duration(minutes: 15),
-    constraints: Constraints(
-      networkType: NetworkType.connected,
-      requiresBatteryNotLow: true,
-    ),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-  );
-
-  // 3. نشغل التطبيق ونرسم الشاشات فوراً
+  // 3. نشغل التطبيق ونرسم الشاشات فوراً (بدون انتظار WorkManager)
   runApp(const MyApp());
 
-  // 4. الحل السحري: نأخر تشغيل المزامنة ثانيتين بين ما التطبيق يفتح ويرتاح
-  Future.delayed(const Duration(seconds: 5), () {
-    SyncManager.instance;
+  // 4. تسجيل WorkManager + الخدمات الخلفية بعد ظهور الواجهة
+  Workmanager().initialize(callbackDispatcher).then((_) {
+    Workmanager().registerPeriodicTask(
+      'myhalaqat-sync',
+      'backgroundSync',
+      frequency: const Duration(minutes: 15),
+      constraints: Constraints(networkType: NetworkType.connected),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+    );
+  });
+  BackgroundSyncService.instance.initialize();
+
+  // 5. نشغل SyncManager فوراً + مزامنة أولية
+  SyncManager.instance;
+  Future.delayed(const Duration(seconds: 3), () {
+    SyncManager.instance.syncAll();
   });
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // تحديث الإشعار فوراً عند أي تغير في عداد المعلقات
+    pendingCountNotifier.addListener(_onPendingChanged);
+  }
+
+  void _onPendingChanged() {
+    // تحديث الإشعار وإدارة الخدمة الخلفية
+    refreshPendingCount();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // فتح التطبيق: سجل أن التطبيق في الواجهة + ابدأ الخدمة
+      AppStateHelper.setForeground(true);
+      if (Platform.isAndroid || Platform.isIOS) {
+        BackgroundSyncService.instance.start();
+      }
+      SyncManager.instance.syncAll();
+    } else if (state == AppLifecycleState.paused) {
+      // طي التطبيق: سجل أن التطبيق في الخلفية + أوقف الخدمة إذا لا توجد طلبات
+      AppStateHelper.setForeground(false);
+      if (Platform.isAndroid || Platform.isIOS) {
+        BackgroundSyncService.stopIfIdle();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
