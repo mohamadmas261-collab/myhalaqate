@@ -54,7 +54,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
     setState(() => _isLoading = true);
     final results = await Future.wait([
       _studentService.getStudentsByCircle(widget.circleId),
-      _saberService.getMySaberRequests(widget.circleId),
+      _saberService.getMySaberRequests(),
       _saberService.getPendingLocalRequests(),
     ]);
     if (mounted) {
@@ -119,10 +119,10 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 80), // مساحة سفلية ثابتة ومضمونة
+            padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + MediaQuery.of(context).padding.bottom + 16),
             children: _filteredStudents.map((s) => _buildStudentCard(s)).toList(),
           ),
-        ), 
+        ),
       ],
     );
   }
@@ -132,7 +132,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
       return const Center(child: Text('لا توجد طلبات سابقة', style: TextStyle(color: Colors.grey, fontSize: 16)));
     }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+      padding: const EdgeInsets.all(12),
       children: [
         if (_pendingLocal.isNotEmpty) ...[
           Padding(
@@ -194,7 +194,6 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
   }
 
   Widget _buildPendingCard(Map<String, dynamic> req) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -207,7 +206,7 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('طلب قيد المزامنة ⏳', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              Text('الجزء ${req['quran_part_id'] ?? '?'}', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey[700], fontSize: 12)),
+              Text('الجزء ${req['quran_part_id'] ?? '?'}', style: TextStyle(color: Colors.grey[700], fontSize: 12)),
             ]),
           ),
           IconButton(
@@ -313,19 +312,16 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
                 ),
                 const SizedBox(height: 24),
 
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  icon: const Icon(Icons.send_rounded),
-                  label: const Text('إرسال الطلب'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary, 
-                    foregroundColor: Colors.white,
-                    // 1. تحديد الحد الأدنى للارتفاع مع أخذ عرض الشاشة (عشان يظل ممتد بالعرض)
-                    minimumSize: const Size.fromHeight(50), 
-                    // 2. إضافة Padding (مسافة داخلية) عشان النص العربي ياخذ راحته وما ينقطش
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                SizedBox(
+                  width: double.infinity, height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    icon: const Icon(Icons.send_rounded),
+                    label: const Text('إرسال الطلب'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -431,13 +427,12 @@ class _CreateSaberRequestScreenState extends State<CreateSaberRequestScreen> wit
 
   Widget _choiceChip(String label, String value, String current, IconData icon, Color color, void Function(String) onChanged) {
     final selected = current == value;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: () => onChanged(value),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.1) : isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade50,
+          color: selected ? color.withOpacity(0.1) : Colors.grey.shade50,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? color : Colors.grey.shade300, width: selected ? 2 : 1),
         ),

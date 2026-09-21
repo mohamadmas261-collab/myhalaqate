@@ -159,7 +159,7 @@ class _CircleMemorizationRecordScreenState extends State<CircleMemorizationRecor
       ),
       body: Column(
         children: [
-          Container( padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          Container(color: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               const Text('فلترة بالتاريخ:', style: TextStyle(fontWeight: FontWeight.bold)),
               OutlinedButton.icon(
@@ -178,7 +178,7 @@ class _CircleMemorizationRecordScreenState extends State<CircleMemorizationRecor
                     onRefresh: _fetchRecords,
                     child: _records.isEmpty
                         ? _buildEmptyState()
-                        : ListView.builder(padding: const EdgeInsets.fromLTRB(12, 12, 12, 80), itemCount: _records.length,
+                        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: _records.length,
                             itemBuilder: (_, i) => _buildRecordCard(_records[i])),
                   ),
           ),

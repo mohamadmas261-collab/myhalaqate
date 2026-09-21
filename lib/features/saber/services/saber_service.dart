@@ -3,7 +3,6 @@ import 'package:myhalaqat/core/network/api_client.dart';
 import 'package:myhalaqat/core/database/database_helper.dart';
 import 'package:myhalaqat/core/network/sync_manager.dart';
 import 'package:myhalaqat/core/notifiers/app_notifiers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 
 class SaberService {
@@ -22,22 +21,11 @@ class SaberService {
     }
   }
 
-  // 💡 التعديل هنا: أضفنا circleId و courseId
-  Future<List<dynamic>> getMySaberRequests(int circleId, {int? courseId}) async {
+  Future<List<dynamic>> getMySaberRequests() async {
     try {
       List<dynamic> serverRequests = [];
       try {
-        // 💡 جلب الـ course_id من الكاش مثل ما عملت بالملفات السابقة
-        final prefs = await SharedPreferences.getInstance();
-        final int resolvedCourseId = courseId ?? prefs.getInt('last_course_id') ?? 0;
-
-        // 💡 بناء الرابط مع الفلاتر (الدورة والحلقة)
-        String url = '/api/quiz-requests/?circle=$circleId';
-        if (resolvedCourseId > 0) {
-          url += '&course=$resolvedCourseId';
-        }
-
-        final response = await _dio.get(url);
+        final response = await _dio.get('/api/quiz-requests/');
         if (response.statusCode == 200) {
           serverRequests = response.data['results'] ?? [];
         }

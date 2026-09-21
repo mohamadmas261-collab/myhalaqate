@@ -172,6 +172,7 @@ class _CircleAttendanceRecordScreenState extends State<CircleAttendanceRecordScr
 
   Widget _buildFilterBar() {
     return Container(
+      color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [

@@ -26,8 +26,7 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen>
-    with SingleTickerProviderStateMixin {
+class _AttendanceScreenState extends State<AttendanceScreen> with SingleTickerProviderStateMixin {
   final StudentService _studentService = StudentService();
   final AttendanceService _attendanceService = AttendanceService();
   final CourseService _courseService = CourseService();
@@ -72,9 +71,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _applyFilter() {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
-      _filteredStudents = _students
-          .where((s) => (s['student_name'] ?? '').toLowerCase().contains(q))
-          .toList();
+      _filteredStudents = _students.where((s) =>
+        (s['student_name'] ?? '').toLowerCase().contains(q)).toList();
       _sortStudents();
     });
   }
@@ -82,10 +80,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _sortStudents() {
     switch (_sortBy) {
       case 'name':
-        _filteredStudents.sort(
-          (a, b) =>
-              (a['student_name'] ?? '').compareTo(b['student_name'] ?? ''),
-        );
+        _filteredStudents.sort((a, b) => (a['student_name'] ?? '').compareTo(b['student_name'] ?? ''));
         break;
     }
   }
@@ -93,26 +88,19 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   Future<void> _fetchStudents() async {
     setState(() => _isLoading = true);
     final data = await _studentService.getStudentsByCircle(widget.circleId);
-    final pendingRecords = await _attendanceService.getPendingAttendance(
-      widget.circleId,
-      _selectedDate,
-    );
+    final pendingRecords = await _attendanceService.getPendingAttendance(widget.circleId, _selectedDate);
 
     // جلب السجلات المتزامنة من الكاش (إن وجدت)
     List<dynamic> syncedRecords = [];
     try {
       final prefs = await SharedPreferences.getInstance();
       final courseId = prefs.getInt('last_course_id') ?? 0;
-      final cached = prefs.getString(
-        'cache_attendance_record_circle_${widget.circleId}_$_selectedDate',
-      );
+      final cached = prefs.getString('cache_attendance_record_circle_${widget.circleId}_$_selectedDate');
       if (cached != null) syncedRecords = jsonDecode(cached);
       // إذا لا يوجد كاش نحاول من API
       if (syncedRecords.isEmpty && courseId > 0) {
         final dio = ApiClient().dio;
-        final res = await dio.get(
-          '/api/attendance/?course=$courseId&date=$_selectedDate',
-        );
+        final res = await dio.get('/api/attendance/?course=$courseId&date=$_selectedDate');
         if (res.statusCode == 200) syncedRecords = res.data['results'] ?? [];
       }
     } catch (_) {}
@@ -150,21 +138,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         _existingRecords = [];
         for (var p in pendingRecords) {
           _existingRecords.add({
-            'student_name':
-                _students.firstWhere(
-                  (s) => s['id'] == p['enrollment_id'],
-                  orElse: () => {'student_name': 'طالب', 'id': 0},
-                )['student_name'] ??
-                'طالب',
+            'student_name': _students.firstWhere(
+              (s) => s['id'] == p['enrollment_id'],
+              orElse: () => {'student_name': 'طالب', 'id': 0},
+            )['student_name'] ?? 'طالب',
             'status': p['status'],
             'date': p['date'],
             'sync_status': p['sync_status'],
           });
         }
         for (var sr in syncedRecords) {
-          if (!_existingRecords.any(
-            (r) => r['student_name'] == sr['student_name'],
-          )) {
+          if (!_existingRecords.any((r) => r['student_name'] == sr['student_name'])) {
             _existingRecords.add(sr);
           }
         }
@@ -175,40 +159,28 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'present':
-        return 'حاضر';
-      case 'absent':
-        return 'غائب';
-      case 'excused':
-        return 'مستأذن';
-      default:
-        return '';
+      case 'present': return 'حاضر';
+      case 'absent': return 'غائب';
+      case 'excused': return 'مستأذن';
+      default: return '';
     }
   }
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'present':
-        return Colors.green;
-      case 'absent':
-        return Colors.red;
-      case 'excused':
-        return Colors.orange;
-      default:
-        return Colors.grey;
+      case 'present': return Colors.green;
+      case 'absent': return Colors.red;
+      case 'excused': return Colors.orange;
+      default: return Colors.grey;
     }
   }
 
   IconData _statusIcon(String status) {
     switch (status) {
-      case 'present':
-        return Icons.check_circle;
-      case 'absent':
-        return Icons.cancel;
-      case 'excused':
-        return Icons.pause_circle;
-      default:
-        return Icons.radio_button_unchecked;
+      case 'present': return Icons.check_circle;
+      case 'absent': return Icons.cancel;
+      case 'excused': return Icons.pause_circle;
+      default: return Icons.radio_button_unchecked;
     }
   }
 
@@ -216,10 +188,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'حضور-غياب',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: Text('حضور/غياب', style: const TextStyle(fontWeight: FontWeight.bold)),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
@@ -240,41 +209,25 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               : Column(
                   children: [
                     _buildDateBar(),
-                    // if (_dateInvalid) _buildDateError(),
+                    if (_dateInvalid) _buildDateError(),
                     _buildBulkActions(),
                     _buildSearchBar(),
                     Expanded(
                       child: _filteredStudents.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'لا يوجد طلاب',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            )
+                          ? const Center(child: Text('لا يوجد طلاب', style: TextStyle(color: Colors.grey, fontSize: 16)))
                           : ListView(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               children: [
-                                ...List.generate(
-                                  _filteredStudents.length,
-                                  (i) => _buildStudentCard(i),
-                                ),
+                                ...List.generate(_filteredStudents.length, (i) => _buildStudentCard(i)),
                                 if (_existingRecords.isNotEmpty) ...[
                                   const SizedBox(height: 8),
                                   _buildHistoryHeader(),
-                                  ..._existingRecords.map(
-                                    (r) => _buildExistingRecordCard(r),
-                                  ),
+                                  ..._existingRecords.map((r) => _buildExistingRecordCard(r)),
                                 ],
                               ],
+                              ),
                             ),
-                    ),
-                  ],
+                          ],
                 ),
           // التبويب الثاني: سجل الحضور
           CircleAttendanceRecordScreen(
@@ -288,9 +241,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   }
 
   Widget _buildDateBar() {
-    final bgColor = Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF1E1E1E)
-        : Colors.white;
+    final bgColor = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: bgColor,
@@ -303,16 +254,11 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           OutlinedButton.icon(
             onPressed: _pickDate,
             icon: const Icon(Icons.edit_calendar, size: 16),
-            label: Text(
-              _displayDate,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            label: Text(_displayDate, style: const TextStyle(fontWeight: FontWeight.bold)),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.green,
               side: BorderSide(color: Colors.green.shade200),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
         ],
@@ -320,45 +266,33 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-  /*Widget _buildDateError() {
+  Widget _buildDateError() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: Colors.red.shade50,
       child: Row(
         children: [
-          Icon(
-            Icons.warning_amber_rounded,
-            color: Colors.red.shade700,
-            size: 18,
-          ),
+          Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 18),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               _dateError.isNotEmpty ? _dateError : 'هذا التاريخ غير مسموح به',
-              style: TextStyle(
-                color: Colors.red.shade700,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12),
             ),
           ),
         ],
       ),
     );
-  }*/
+  }
 
   Widget _buildBulkActions() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade50,
+      color: Colors.grey.shade50,
       child: Row(
         children: [
-          const Text(
-            'تحديد الكل:',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-          ),
+          const Text('تحديد الكل:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
           const SizedBox(width: 12),
           _bulkBtn(Icons.check_circle, Colors.green, 'present'),
           const SizedBox(width: 8),
@@ -372,18 +306,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             onTap: () => setState(() => _statuses.clear()),
             child: Container(
               padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
+              decoration: BoxDecoration(color: Colors.grey.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
               child: const Icon(Icons.clear_all, color: Colors.grey, size: 18),
             ),
           ),
           const Spacer(),
-          Text(
-            '${_statuses.values.where((s) => s.isNotEmpty).length}/${_students.length}',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-          ),
+          Text('${_statuses.values.where((s) => s.isNotEmpty).length}/${_students.length}',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
         ],
       ),
     );
@@ -391,24 +320,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
   Widget _bulkBtn(IconData icon, Color color, String status) {
     return InkWell(
-      onTap: () =>
-          setState(() => _students.forEach((s) => _statuses[s['id']] = status)),
+      onTap: () => setState(() => _students.forEach((s) => _statuses[s['id']] = status)),
       child: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
+        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.3))),
         child: Icon(icon, color: color, size: 20),
       ),
     );
   }
 
   Widget _buildSearchBar() {
-    final bgColor = Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF1E1E1E)
-        : Colors.white;
+    final bgColor = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       color: bgColor,
@@ -421,23 +343,12 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 hintText: 'بحث عن طالب...',
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                        },
-                      )
+                    ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _searchCtrl.clear(); })
                     : null,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
               ),
             ),
           ),
@@ -447,21 +358,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               value: _sortBy,
               icon: const Icon(Icons.sort, size: 20),
               items: const [
-                DropdownMenuItem(
-                  value: 'name',
-                  child: Text(
-                    'أبجدي',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ),
+                DropdownMenuItem(value: 'name', child: Text('أبجدي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
               ],
-              onChanged: (v) {
-                if (v != null)
-                  setState(() {
-                    _sortBy = v;
-                    _sortStudents();
-                  });
-              },
+              onChanged: (v) { if (v != null) setState(() { _sortBy = v; _sortStudents(); }); },
             ),
           ),
         ],
@@ -476,53 +375,25 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         children: [
           Container(
             padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: AppColors.info.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
+            decoration: BoxDecoration(color: AppColors.info.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
             child: const Icon(Icons.history, color: AppColors.info, size: 18),
           ),
           const SizedBox(width: 10),
-          const Text(
-            'السجلات المسجلة لهذا التاريخ',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
+          const Text('السجلات المسجلة لهذا التاريخ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           const Spacer(),
-          Text(
-            '${_existingRecords.length}',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-          ),
+          Text('${_existingRecords.length}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
         ],
       ),
     );
   }
 
   Widget _buildExistingRecordCard(Map<String, dynamic> record) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    Color statusColor;
-    String statusText;
-    IconData statusIcon;
+    Color statusColor; String statusText; IconData statusIcon;
     switch (record['status']) {
-      case 'present':
-        statusColor = Colors.green;
-        statusText = 'حاضر';
-        statusIcon = Icons.check_circle;
-        break;
-      case 'absent':
-        statusColor = Colors.red;
-        statusText = 'غائب';
-        statusIcon = Icons.cancel;
-        break;
-      case 'excused':
-        statusColor = Colors.orange;
-        statusText = 'مستأذن';
-        statusIcon = Icons.pause_circle;
-        break;
-      default:
-        statusColor = Colors.grey;
-        statusText = 'غير محدد';
-        statusIcon = Icons.help;
-        break;
+      case 'present': statusColor = Colors.green; statusText = 'حاضر'; statusIcon = Icons.check_circle; break;
+      case 'absent': statusColor = Colors.red; statusText = 'غائب'; statusIcon = Icons.cancel; break;
+      case 'excused': statusColor = Colors.orange; statusText = 'مستأذن'; statusIcon = Icons.pause_circle; break;
+      default: statusColor = Colors.grey; statusText = 'غير محدد'; statusIcon = Icons.help; break;
     }
     final isPending = record['sync_status'] != 'synced';
 
@@ -530,42 +401,22 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       margin: const EdgeInsets.only(bottom: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       elevation: 0,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade50,
+      color: Colors.grey.shade50,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
             Icon(statusIcon, color: statusColor, size: 18),
             const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                record['student_name'] ?? '',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-                maxLines: 1, // تحديد سطر واحد
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            Expanded(child: Text(record['student_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                statusText,
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
-              ),
+              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+              child: Text(statusText, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11)),
             ),
             if (isPending) ...[
               const SizedBox(width: 6),
-              const Text('⏳', style: TextStyle(fontSize: 8)),
+              const Text('⏳', style: TextStyle(fontSize: 12)),
             ],
           ],
         ),
@@ -589,23 +440,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundColor: currentStatus.isEmpty
-                  ? Colors.grey.shade100
-                  : _statusColor(currentStatus).withOpacity(0.15),
+              backgroundColor: currentStatus.isEmpty ? Colors.grey.shade100 : _statusColor(currentStatus).withOpacity(0.15),
               child: currentStatus.isEmpty
-                  ? Text(
-                      '${index + 1}',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    )
-                  : Icon(
-                      _statusIcon(currentStatus),
-                      color: _statusColor(currentStatus),
-                      size: 22,
-                    ),
+                  ? Text('${index + 1}', style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.bold, fontSize: 14))
+                  : Icon(_statusIcon(currentStatus), color: _statusColor(currentStatus), size: 22),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -614,39 +452,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 children: [
                   Row(
                     children: [
-                      Expanded(
-                        child: FittedBox(
-                          fit: BoxFit
-                              .scaleDown, // هاي بتصغر الخط بس إذا كان طويل
-                          alignment:
-                              Alignment.centerRight, // عشان يضل محاذاة لليمين
-                          child: Text(
-                            student['student_name'] ?? 'بدون اسم',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: isPending
-                                  ? Colors.orange.shade700
-                                  : Colors.black87,
-                            ),
-                          ),
-                        ),
-                      ),
+                      Text(student['student_name'] ?? 'بدون اسم',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: isPending ? Colors.orange.shade700 : Colors.black87)),
                       if (isPending) ...[
                         const SizedBox(width: 6),
-                        const Text('⏳', style: TextStyle(fontSize: 12)),
+                        const Text('⏳', style: TextStyle(fontSize: 14)),
                       ],
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    _statusLabel(currentStatus),
-                    style: TextStyle(
-                      color: _statusColor(currentStatus),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  Text(_statusLabel(currentStatus),
+                      style: TextStyle(color: _statusColor(currentStatus), fontSize: 12, fontWeight: FontWeight.w500)),
                 ],
               ),
             ),
@@ -657,27 +473,15 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 const SizedBox(width: 2),
                 _statusToggle(sId, 'absent', Icons.cancel, Colors.red),
                 const SizedBox(width: 2),
-                _statusToggle(
-                  sId,
-                  'excused',
-                  Icons.pause_circle,
-                  Colors.orange,
-                ),
+                _statusToggle(sId, 'excused', Icons.pause_circle, Colors.orange),
                 if (isPending) ...[
                   const SizedBox(width: 4),
                   InkWell(
                     onTap: () => _editPending(sId),
                     child: Container(
                       padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Icon(
-                        Icons.edit,
-                        color: Colors.amber,
-                        size: 16,
-                      ),
+                      decoration: BoxDecoration(color: Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                      child: const Icon(Icons.edit, color: Colors.amber, size: 16),
                     ),
                   ),
                 ],
@@ -689,16 +493,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-  Widget _statusToggle(
-    int studentId,
-    String status,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _statusToggle(int studentId, String status, IconData icon, Color color) {
     final isSelected = _statuses[studentId] == status;
     return GestureDetector(
-      onTap: () =>
-          setState(() => _statuses[studentId] = isSelected ? '' : status),
+      onTap: () => setState(() => _statuses[studentId] = isSelected ? '' : status),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(8),
@@ -707,11 +505,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: isSelected ? color : Colors.grey.shade300),
         ),
-        child: Icon(
-          icon,
-          color: isSelected ? Colors.white : Colors.grey.shade400,
-          size: 20,
-        ),
+        child: Icon(icon, color: isSelected ? Colors.white : Colors.grey.shade400, size: 20),
       ),
     );
   }
@@ -725,14 +519,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
     if (picked != null) {
       final newDate = picked.toIso8601String().split('T')[0];
-      if (newDate.compareTo(DateTime.now().toIso8601String().split('T')[0]) >
-          0) {
-        CustomSnackbar.show(
-          context,
-          message: 'لا يمكن اختيار تاريخ مستقبلي',
-          color: Colors.red,
-          icon: Icons.block,
-        );
+      if (newDate.compareTo(DateTime.now().toIso8601String().split('T')[0]) > 0) {
+        CustomSnackbar.show(context, message: 'لا يمكن اختيار تاريخ مستقبلي', color: Colors.red, icon: Icons.block);
         return;
       }
       setState(() {
@@ -754,10 +542,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     final chosen = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text(
-          'تعديل السجل المعلق',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('تعديل السجل المعلق', style: TextStyle(fontWeight: FontWeight.bold)),
         children: ['present', 'absent', 'excused'].map((s) {
           return RadioListTile<String>(
             title: Text(_statusLabel(s)),
@@ -770,21 +555,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
 
     if (chosen != null && chosen != currentStatus) {
-      final ok = await _attendanceService.updatePendingAttendance(
-        localId,
-        chosen,
-      );
+      final ok = await _attendanceService.updatePendingAttendance(localId, chosen);
       if (ok && mounted) {
-        setState(() {
-          _statuses[studentId] = chosen;
-          _pendingMap[studentId] = {...pending, 'status': chosen};
-        });
-        CustomSnackbar.show(
-          context,
-          message: 'تم التعديل',
-          color: Colors.green,
-          icon: Icons.check_circle,
-        );
+        setState(() { _statuses[studentId] = chosen; _pendingMap[studentId] = {...pending, 'status': chosen}; });
+        CustomSnackbar.show(context, message: 'تم التعديل', color: Colors.green, icon: Icons.check_circle);
       }
     } else if (chosen == null) {
       final delete = await showDialog<bool>(
@@ -793,30 +567,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           title: const Text('حذف السجل؟'),
           content: const Text('سيتم حذف سجل الحضور من قائمة الانتظار.'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('إلغاء'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('حذف', style: TextStyle(color: Colors.red)),
-            ),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف', style: TextStyle(color: Colors.red))),
           ],
         ),
       );
       if (delete == true) {
         final ok = await _attendanceService.deletePendingAttendance(localId);
         if (ok && mounted) {
-          setState(() {
-            _pendingMap.remove(studentId);
-            _statuses[studentId] = '';
-          });
-          CustomSnackbar.show(
-            context,
-            message: 'تم الحذف',
-            color: Colors.orange,
-            icon: Icons.delete,
-          );
+          setState(() { _pendingMap.remove(studentId); _statuses[studentId] = ''; });
+          CustomSnackbar.show(context, message: 'تم الحذف', color: Colors.orange, icon: Icons.delete);
         }
       }
     }
@@ -826,47 +586,27 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.0 : 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(color: isDark ? const Color(0xFF1E1E1E) : Colors.white, boxShadow: [
+        BoxShadow(color: Colors.black.withOpacity(isDark ? 0.0 : 0.05), blurRadius: 10, offset: const Offset(0, -5)),
+      ]),
       child: SafeArea(
         child: SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 48,
           child: ElevatedButton.icon(
             onPressed: _isSaving ? null : _saveAttendance,
             icon: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.cloud_upload),
             label: Text(_isSaving ? 'جارٍ الحفظ...' : 'حفظ الحضور'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: Colors.green,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              textStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
         ),
+      ),
       ),
     );
   }
@@ -874,12 +614,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   Future<void> _saveAttendance() async {
     final marked = _statuses.values.where((s) => s.isNotEmpty);
     if (marked.isEmpty) {
-      CustomSnackbar.show(
-        context,
-        message: 'لم يتم تحديد أي طالب',
-        color: Colors.orange,
-        icon: Icons.warning_amber_rounded,
-      );
+      CustomSnackbar.show(context, message: 'لم يتم تحديد أي طالب', color: Colors.orange, icon: Icons.warning_amber_rounded);
       return;
     }
 
@@ -887,22 +622,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     final prefs = await SharedPreferences.getInstance();
     final courseId = prefs.getInt('last_course_id') ?? 0;
     if (courseId > 0) {
-      final valid = await _courseService.isDateWithinCourse(
-        courseId,
-        _selectedDate,
-      );
+      final valid = await _courseService.isDateWithinCourse(courseId, _selectedDate);
       if (!valid && mounted) {
         setState(() {
           _dateInvalid = true;
-          _dateError =
-              'لا يمكن الحفظ في هذا التاريخ — اليوم خارج أيام الدورة أو تاريخ مستقبلي';
+          _dateError = 'لا يمكن الحفظ في هذا التاريخ — اليوم خارج أيام الدورة أو تاريخ مستقبلي';
         });
-        CustomSnackbar.show(
-          context,
-          message: _dateError,
-          color: Colors.red,
-          icon: Icons.block,
-        );
+        CustomSnackbar.show(context, message: _dateError, color: Colors.red, icon: Icons.block);
         return;
       }
     }
@@ -915,29 +641,18 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       if (entry.value.isNotEmpty) {
         final existing = _pendingMap[entry.key];
         if (existing != null && existing['local_id'] != null) {
-          await db.update(
-            'pending_attendance',
-            {'status': entry.value, 'action': 'update'},
-            'id = ?',
-            [existing['local_id']],
-          );
+          await db.update('pending_attendance', {'status': entry.value, 'action': 'update'}, 'id = ?', [existing['local_id']]);
         } else if (existing != null) {
           // synced record → insert كسجل تعديل
           await db.insert('pending_attendance', {
-            'enrollment_id': entry.key,
-            'date': _selectedDate,
-            'status': entry.value,
-            'circle_id': widget.circleId,
-            'action': 'update',
+            'enrollment_id': entry.key, 'date': _selectedDate, 'status': entry.value,
+            'circle_id': widget.circleId, 'action': 'update',
             'created_at': DateTime.now().toIso8601String(),
           });
         } else {
           await db.insert('pending_attendance', {
-            'enrollment_id': entry.key,
-            'date': _selectedDate,
-            'status': entry.value,
-            'circle_id': widget.circleId,
-            'created_at': DateTime.now().toIso8601String(),
+            'enrollment_id': entry.key, 'date': _selectedDate, 'status': entry.value,
+            'circle_id': widget.circleId, 'created_at': DateTime.now().toIso8601String(),
           });
         }
         savedCount++;
@@ -945,8 +660,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     }
 
     final result = await SyncManager.instance.syncAll();
-    pendingCountNotifier.value = (pendingCountNotifier.value + savedCount)
-        .clamp(0, 999999);
+    pendingCountNotifier.value = (pendingCountNotifier.value + savedCount).clamp(0, 999999);
 
     if (mounted) {
       setState(() {
@@ -962,12 +676,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             };
             // إضافة للسجلات المعروضة
             _existingRecords.add({
-              'student_name':
-                  _students.firstWhere(
-                    (s) => s['id'] == entry.key,
-                    orElse: () => {'student_name': 'طالب', 'id': 0},
-                  )['student_name'] ??
-                  'طالب',
+              'student_name': _students.firstWhere(
+                (s) => s['id'] == entry.key,
+                orElse: () => {'student_name': 'طالب', 'id': 0},
+              )['student_name'] ?? 'طالب',
               'status': entry.value,
               'date': _selectedDate,
               'sync_status': 'pending',
@@ -976,27 +688,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         }
       });
       if (result.successCount > 0) {
-        CustomSnackbar.show(
-          context,
-          message: 'تم حفظ وإرسال $savedCount سجل ✅',
-          color: Colors.green,
-          icon: Icons.check_circle,
-        );
+        CustomSnackbar.show(context, message: 'تم حفظ وإرسال $savedCount سجل ✅', color: Colors.green, icon: Icons.check_circle);
       } else if (result.failCount > 0) {
-        CustomSnackbar.show(
-          context,
-          message: 'حفظ $savedCount محلياً — المزامنة قيد الانتظار ⏳',
-          color: Colors.orange,
-          icon: Icons.cloud_upload,
-        );
+        CustomSnackbar.show(context, message: 'حفظ $savedCount محلياً — المزامنة قيد الانتظار ⏳', color: Colors.orange, icon: Icons.cloud_upload);
       } else {
-        CustomSnackbar.show(
-          context,
-          message: 'تم حفظ $savedCount سجل محلياً',
-          color: Colors.green,
-          icon: Icons.check_circle,
-        );
+        CustomSnackbar.show(context, message: 'تم حفظ $savedCount سجل محلياً', color: Colors.green, icon: Icons.check_circle);
       }
     }
   }
 }
+
+

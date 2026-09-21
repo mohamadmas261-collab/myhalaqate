@@ -70,7 +70,6 @@ class _BatchMemorizationScreenState extends State<BatchMemorizationScreen> with 
       CircleMemorizationRecordScreen(circleId: widget.circleId, circleName: widget.circleName),
     ]),
     bottomNavigationBar: _isLoading || _studentMemCount.isEmpty ? null : _buildBottomBar(),
-    
   );
 
   Widget _buildRegisterTab() {
@@ -147,7 +146,6 @@ class _BatchMemorizationScreenState extends State<BatchMemorizationScreen> with 
   }
 
   Widget _buildStudentCard(int index) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final s = _filteredStudents[index]; final sId = s['id'];
     final mc = _studentMemCount[sId] ?? 0; final marked = mc > 0;
     return Card(
@@ -177,7 +175,7 @@ class _BatchMemorizationScreenState extends State<BatchMemorizationScreen> with 
               child: Icon(marked ? Icons.check_circle : Icons.person, color: marked ? AppColors.primary : Colors.grey, size: 22)),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(s['student_name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: marked ? AppColors.primary :  isDark ? Colors.white : Colors.black87)),
+              Text(s['student_name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: marked ? AppColors.primary : Colors.black87)),
               if (marked) Text('$mc تسجيل حفظ', style: TextStyle(color: AppColors.primary, fontSize: 12)),
             ])),
             Icon(marked ? Icons.check_circle : Icons.add_circle_outline, color: marked ? AppColors.primary : Colors.grey.shade400, size: 24),
@@ -187,47 +185,22 @@ class _BatchMemorizationScreenState extends State<BatchMemorizationScreen> with 
     );
   }
 
-Widget _buildBottomBar() => Container(
+  Widget _buildBottomBar() => Container(
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      color: Theme.of(context).brightness == Brightness.dark 
-          ? const Color(0xFF1E1E1E) 
-          : Colors.white,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(
-              Theme.of(context).brightness == Brightness.dark ? 0.0 : 0.05),
-          blurRadius: 10,
-          offset: const Offset(0, -5),
-        )
-      ],
-    ),
-    // SafeArea من جوا عشان تحمي الزر، بس تخلي لون الـ Container يكمل للآخر
-    child: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: SizedBox(
-          width: double.infinity, 
-          height: 52,
-          child: ElevatedButton.icon(
-            onPressed: _isSaving ? null : _saveAll,
-            icon: _isSaving 
-                ? const SizedBox(
-                    width: 20, 
-                    height: 20, 
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
-                  ) 
-                : const Icon(Icons.cloud_upload),
-            label: Text(_isSaving ? 'جارٍ الحفظ...' : 'حفظ الكل'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary, 
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
-              textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-          ),
-        ),
+      color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white,
+      boxShadow: [BoxShadow(
+        color: Colors.black.withOpacity(Theme.of(context).brightness == Brightness.dark ? 0.0 : 0.05),
+        blurRadius: 10, offset: const Offset(0, -5))]),
+    child: SafeArea(child: SizedBox(width: double.infinity, height: 48,
+      child: ElevatedButton.icon(
+        onPressed: _isSaving ? null : _saveAll,
+        icon: _isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.cloud_upload),
+        label: Text(_isSaving ? 'جارٍ الحفظ...' : 'حفظ الكل'),
+        style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       ),
-    ),
+    )),
   );
 
   Future<void> _saveAll() async {
@@ -298,29 +271,6 @@ class _StudentMemorizationPageState extends State<_StudentMemorizationPage> {
       actions: [Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Center(child: Text('${_forms.length} تسجيل', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold))))],
     ),
-     
-     bottomNavigationBar: SafeArea( // SafeArea هنا تمنع الزر ينقطش من تحت
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: SizedBox(
-          width: double.infinity, 
-          height: 52,
-          child: ElevatedButton.icon(
-            onPressed: _saveForms, 
-            icon: const Icon(Icons.cloud_upload), 
-            label: Text('حفظ الكل (${_forms.length})'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary, 
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
-              textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
-            ),
-          ),
-        ),
-      ),
-    ),
-     
-     
       body: ListView(padding: const EdgeInsets.all(16), children: [
       Card(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -376,13 +326,13 @@ class _StudentMemorizationPageState extends State<_StudentMemorizationPage> {
           side: BorderSide(color: AppColors.primary.withOpacity(0.3))),
       ),
       const SizedBox(height: 24),
-      /*SizedBox(width: double.infinity, height: 52,
+      SizedBox(width: double.infinity, height: 52,
         child: ElevatedButton.icon(
           onPressed: _saveForms, icon: const Icon(Icons.cloud_upload), label: Text('حفظ الكل (${_forms.length})'),
           style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ),
-      ),*/
+      ),
     ]),
   );
 
@@ -466,7 +416,7 @@ class _StudentMemorizationPageState extends State<_StudentMemorizationPage> {
     ));
   }
 
-  Color _rCol(String r) => switch (r) { 'excellent' => AppColors.success, 'good' => AppColors.accent, _ => AppColors.warning };
+  Color _rCol(String r) => switch (r) { 'excellent' => AppColors.accent, 'good' => AppColors.success, _ => AppColors.warning };
   IconData _rIco(String r) => switch (r) { 'excellent' => Icons.auto_awesome, 'good' => Icons.thumb_up, _ => Icons.refresh };
   String _rLab(String r) => switch (r) { 'excellent' => 'ممتاز', 'good' => 'جيد', _ => 'إعادة' };
   String _resultLabel(String r) => switch (r) { 'excellent' => 'ممتاز', 'good' => 'جيد', _ => 'إعادة' };

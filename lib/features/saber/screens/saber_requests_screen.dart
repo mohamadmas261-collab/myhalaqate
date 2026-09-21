@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:myhalaqat/features/saber/services/saber_service.dart';
 
 class SaberRequestsScreen extends StatefulWidget {
-  final int circleId;
-  const SaberRequestsScreen(Key? key, this.circleId) : super(key: key);
+  const SaberRequestsScreen({Key? key}) : super(key: key);
 
   @override
   State<SaberRequestsScreen> createState() => _SaberRequestsScreenState();
@@ -40,7 +39,7 @@ class _SaberRequestsScreenState extends State<SaberRequestsScreen>
 
   Future<void> _fetchRequests() async {
     setState(() => _isLoading = true);
-    final data = await _saberService.getMySaberRequests(widget.circleId);
+    final data = await _saberService.getMySaberRequests();
     if (mounted) {
       setState(() {
         _allRequests = data;
